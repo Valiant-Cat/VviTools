@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "VviTools",
+  "version": "0.1.0",
+  "identifier": "dev.vvicat.vvitools",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "VviTools",
+        "width": 720,
+        "height": 420,
+        "minWidth": 640,
+        "minHeight": 360,
+        "center": true,
+        "decorations": false,
+        "resizable": true,
+        "alwaysOnTop": true,
+        "shadow": true,
+        "transparent": false
+      },
+      {
+        "label": "clipboard",
+        "title": "剪贴板",
+        "url": "index.html?window=clipboard",
+        "width": 940,
+        "height": 238,
+        "minWidth": 820,
+        "minHeight": 230,
+        "center": true,
+        "visible": false,
+        "decorations": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "shadow": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$HOME/Library/Application Support/VviTools/clipboard/images/**/*"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": []
+  }
+}
