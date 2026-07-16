@@ -4,6 +4,22 @@
 
 ---
 
+## [LRN-20260716-001] plugin-architecture
+
+**Logged**: 2026-07-16T11:21:00Z
+**Priority**: high
+**Status**: pending
+**Area**: backend
+
+### Summary
+VviTools 的捆绑内置插件不能只有 `plugin.json`，应包含入口契约、README 和资产。
+
+### Details
+用户明确纠正“剪贴板只是一个 plugin.json 文件吗？没有代码啥的吗”，后续要求改为真正的“捆绑内置插件”。正确结构是根目录 `plugins/<plugin-id>/` 下至少包含 `plugin.json`、内置入口契约文件、README 和图标资产；高权限能力仍由 Rust/Tauri 宿主桥接执行。
+
+### Suggested Action
+后续新增系统级内置能力时，优先采用 `runtime: "builtin"` + `builtin.bridge` + `builtin.host_commands` 的插件目录结构，并确保 `plugins/` 作为 Tauri bundle resource 随正式包分发。
+
 ## [LRN-20260710-001] macos
 
 **Logged**: 2026-07-10T05:40:00Z
