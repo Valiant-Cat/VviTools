@@ -19,9 +19,11 @@ mod tests {
             name: "回显工具".into(),
             version: "1.0.0".into(),
             description: "返回输入文本".into(),
+            icon: String::new(),
             keywords: vec!["echo".into(), "回显".into()],
             runtime,
             entry: entry.into(),
+            builtin: None,
             permissions: vec!["clipboard".into()],
             commands: vec![crate::plugin::PluginCommand {
                 id: "echo.run".into(),
@@ -109,6 +111,10 @@ mod tests {
             name: "回显工具".into(),
             version: "1.0.0".into(),
             description: "测试插件".into(),
+            icon: String::new(),
+            runtime: "node".into(),
+            entry: "main.js".into(),
+            bundled: false,
             download_url: zip_path.to_string_lossy().into_owned(),
             sha256: None,
             permissions: vec!["clipboard".into()],
@@ -159,6 +165,11 @@ mod tests {
         let mut bundled = sample_manifest(PluginRuntime::Builtin, "builtin:clipboard");
         bundled.id = "dev.vvicat.clipboard".into();
         bundled.name = "内置剪贴板".into();
+        bundled.builtin = Some(crate::plugin::BuiltinPluginSpec {
+            module: "builtin.ts".into(),
+            bridge: "host.clipboard".into(),
+            host_commands: vec!["echo.run".into()],
+        });
         fs::write(
             bundled_dir.join("plugin.json"),
             serde_json::to_vec_pretty(&bundled).unwrap(),

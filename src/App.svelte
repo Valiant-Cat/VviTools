@@ -37,6 +37,10 @@
     name: string;
     version: string;
     description: string;
+    icon: string;
+    runtime: string;
+    entry: string;
+    bundled: boolean;
     permissions: string[];
     commands: number;
   };
@@ -46,6 +50,10 @@
     name: string;
     version: string;
     description: string;
+    icon: string;
+    runtime: string;
+    entry: string;
+    bundled: boolean;
     download_url: string;
     sha256?: string | null;
     permissions: string[];
@@ -436,7 +444,7 @@
   function matchText(item: MarketplaceEntry | PluginView, value: string) {
     const q = value.trim().toLowerCase();
     if (!q) return true;
-    return [item.id, item.name, item.description, item.version, item.permissions.join(" ")]
+    return [item.id, item.name, item.description, item.version, item.runtime, item.entry, item.permissions.join(" ")]
       .join(" ")
       .toLowerCase()
       .includes(q);
@@ -829,12 +837,13 @@
               <div class="detail-meta">
                 <span>版本 {marketDetail.version}</span>
                 <span>权限 {marketDetail.permissions.join("、") || "无"}</span>
-                <span>JSON-RPC · zip</span>
+                <span>{marketDetail.bundled ? "捆绑内置" : "JSON-RPC · zip"}</span>
+                <span>{marketDetail.runtime || "node"} · {marketDetail.entry || "main.js"}</span>
               </div>
               <div class="detail-home">
                 {#if isClipboardApp}
                   <h3>剪切板</h3>
-                  <p>该工具作为 VviTools 系统能力运行，后台记录文本剪贴板历史。使用 Alt + V 会打开独立底部剪贴板窗口。</p>
+                  <p>该工具是随应用分发的捆绑内置插件，插件目录声明入口、图标、权限和宿主桥接；高权限剪贴板能力由 Rust 宿主执行。使用 Alt + V 会打开独立底部剪贴板窗口。</p>
                   <div class="clipboard-product-preview">
                     <div class="preview-toolbar">
                       <span>Clipboard</span>
@@ -903,6 +912,8 @@
               </div>
               <div class="detail-meta">
                 <span>{pluginDetail.commands} 个命令</span>
+                <span>{pluginDetail.bundled ? "捆绑内置" : "本地安装"}</span>
+                <span>{pluginDetail.runtime} · {pluginDetail.entry}</span>
                 <span>权限 {pluginDetail.permissions.join("、") || "无"}</span>
               </div>
               <div class="feature-tags">

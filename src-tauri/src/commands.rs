@@ -18,7 +18,7 @@ use sha2::Digest;
 use tauri::{Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow};
 use vvitools_core::plugin::{
     bundled_plugins_dir, default_plugins_dir, ensure_action_allowed, install_plugin_from_zip,
-    load_available_plugins, load_plugins, run_plugin_command, search_commands, CommandInput,
+    load_available_plugins_from, load_plugins, run_plugin_command, search_commands, CommandInput,
     CommandMatch, InstalledPlugin, MarketplaceEntry, PermissionDecision, RpcAction, RpcResult,
 };
 
@@ -28,6 +28,10 @@ pub struct PluginView {
     pub name: String,
     pub version: String,
     pub description: String,
+    pub icon: String,
+    pub runtime: String,
+    pub entry: String,
+    pub bundled: bool,
     pub permissions: Vec<String>,
     pub commands: usize,
 }
@@ -84,8 +88,8 @@ const APP_BUNDLE_ID: &str = "dev.vvicat.vvitools";
 static PREVIOUS_FRONTMOST_APP: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 #[tauri::command]
-pub fn list_plugins() -> Result<Vec<PluginView>, String> {
-    load_available_plugins()
+pub fn list_plugins(app: tauri::AppHandle) -> Result<Vec<PluginView>, String> {
+    load_available_plugins_for_app(&app)
         .map_err(to_message)?
         .into_iter()
         .map(plugin_to_view)
@@ -94,14 +98,20 @@ pub fn list_plugins() -> Result<Vec<PluginView>, String> {
 }
 
 #[tauri::command]
-pub fn search_plugin_commands(query: String) -> Result<Vec<CommandMatch>, String> {
-    let plugins = load_available_plugins().map_err(to_message)?;
+pub fn search_plugin_commands(
+    app: tauri::AppHandle,
+    query: String,
+) -> Result<Vec<CommandMatch>, String> {
+    let plugins = load_available_plugins_for_app(&app).map_err(to_message)?;
     Ok(search_commands(&plugins, &query))
 }
 
 #[tauri::command]
-pub fn execute_plugin_command(request: RunRequest) -> Result<RpcResult, String> {
-    let plugins = load_available_plugins().map_err(to_message)?;
+pub fn execute_plugin_command(
+    app: tauri::AppHandle,
+    request: RunRequest,
+) -> Result<RpcResult, String> {
+    let plugins = load_available_plugins_for_app(&app).map_err(to_message)?;
     let plugin = plugins
         .iter()
         .find(|plugin| plugin.manifest.id == request.plugin_id)
@@ -118,8 +128,8 @@ pub fn execute_plugin_command(request: RunRequest) -> Result<RpcResult, String> 
 }
 
 #[tauri::command]
-pub fn execute_plugin_action(request: ActionRequest) -> Result<(), String> {
-    let plugins = load_available_plugins().map_err(to_message)?;
+pub fn execute_plugin_action(app: tauri::AppHandle, request: ActionRequest) -> Result<(), String> {
+    let plugins = load_available_plugins_for_app(&app).map_err(to_message)?;
     let plugin = plugins
         .iter()
         .find(|plugin| plugin.manifest.id == request.plugin_id)
@@ -323,7 +333,7 @@ pub fn load_marketplace(app: tauri::AppHandle) -> Result<Vec<MarketplaceEntry>, 
             return serde_json::from_slice(&data).map_err(to_message);
         }
     }
-    bundled_marketplace().map_err(to_message)
+    bundled_marketplace(&bundled_plugins_dir_for_app(&app)).map_err(to_message)
 }
 
 #[tauri::command]
@@ -446,14 +456,20 @@ printf '{"type":"text","text":"回显：%s"}\n' "$QUERY"
     Ok(())
 }
 
-fn bundled_marketplace() -> Result<Vec<MarketplaceEntry>, Box<dyn std::error::Error>> {
-    let mut entries = load_plugins(&bundled_plugins_dir())?
+fn bundled_marketplace(
+    bundled_root: &std::path::Path,
+) -> Result<Vec<MarketplaceEntry>, Box<dyn std::error::Error>> {
+    let mut entries = load_plugins(bundled_root)?
         .into_iter()
         .map(|plugin| MarketplaceEntry {
             id: plugin.manifest.id,
             name: plugin.manifest.name,
             version: plugin.manifest.version,
             description: plugin.manifest.description,
+            icon: plugin.manifest.icon,
+            runtime: format!("{:?}", plugin.manifest.runtime).to_lowercase(),
+            entry: plugin.manifest.entry,
+            bundled: true,
             download_url: String::new(),
             sha256: None,
             permissions: plugin.manifest.permissions,
@@ -515,12 +531,34 @@ console.log(JSON.stringify({
         name: "文本工具".into(),
         version: "1.0.0".into(),
         description: "静态市场样例插件，演示 zip 安装、权限确认和 Node JSON-RPC 执行。".into(),
+        icon: String::new(),
+        runtime: "node".into(),
+        entry: "main.js".into(),
+        bundled: false,
         download_url: zip_path.to_string_lossy().into_owned(),
         sha256: None,
         permissions: vec!["clipboard".into()],
     });
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(entries)
+}
+
+fn bundled_plugins_dir_for_app(app: &tauri::AppHandle) -> PathBuf {
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        for relative in ["plugins", "_up_/plugins"] {
+            let resource_plugins = resource_dir.join(relative);
+            if resource_plugins.exists() {
+                return resource_plugins;
+            }
+        }
+    }
+    bundled_plugins_dir()
+}
+
+fn load_available_plugins_for_app(
+    app: &tauri::AppHandle,
+) -> Result<Vec<InstalledPlugin>, Box<dyn std::error::Error>> {
+    load_available_plugins_from(&bundled_plugins_dir_for_app(app)).map_err(Into::into)
 }
 
 fn read_text_from_clipboard() -> Result<String, String> {
@@ -808,11 +846,17 @@ fn clipboard_files_preview(file_paths: &[String]) -> String {
 }
 
 fn plugin_to_view(plugin: InstalledPlugin) -> PluginView {
+    let bundled_root = bundled_plugins_dir();
+    let bundled = plugin.dir.starts_with(&bundled_root);
     PluginView {
         id: plugin.manifest.id,
         name: plugin.manifest.name,
         version: plugin.manifest.version,
         description: plugin.manifest.description,
+        icon: plugin.manifest.icon,
+        runtime: format!("{:?}", plugin.manifest.runtime).to_lowercase(),
+        entry: plugin.manifest.entry,
+        bundled,
         permissions: plugin.manifest.permissions,
         commands: plugin.manifest.commands.len(),
     }

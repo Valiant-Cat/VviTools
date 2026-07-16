@@ -35,13 +35,25 @@ pub struct PluginManifest {
     pub version: String,
     pub description: String,
     #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
     pub keywords: Vec<String>,
     pub runtime: PluginRuntime,
     pub entry: String,
     #[serde(default)]
+    pub builtin: Option<BuiltinPluginSpec>,
+    #[serde(default)]
     pub permissions: Vec<String>,
     #[serde(default)]
     pub commands: Vec<PluginCommand>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuiltinPluginSpec {
+    pub module: String,
+    pub bridge: String,
+    #[serde(default)]
+    pub host_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,6 +120,14 @@ pub struct MarketplaceEntry {
     pub name: String,
     pub version: String,
     pub description: String,
+    #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
+    pub runtime: String,
+    #[serde(default)]
+    pub entry: String,
+    #[serde(default)]
+    pub bundled: bool,
     pub download_url: String,
     pub sha256: Option<String>,
     #[serde(default)]
@@ -135,7 +155,11 @@ pub fn bundled_plugins_dir() -> PathBuf {
 }
 
 pub fn load_available_plugins() -> Result<Vec<InstalledPlugin>> {
-    let mut plugins = load_plugins(&bundled_plugins_dir())?;
+    load_available_plugins_from(&bundled_plugins_dir())
+}
+
+pub fn load_available_plugins_from(bundled_root: &Path) -> Result<Vec<InstalledPlugin>> {
+    let mut plugins = load_plugins(bundled_root)?;
     let bundled_ids = plugins
         .iter()
         .map(|plugin| plugin.manifest.id.clone())
@@ -294,6 +318,25 @@ fn run_builtin_command(
     command_id: &str,
     _input: CommandInput,
 ) -> Result<RpcResult> {
+    let Some(spec) = &plugin.manifest.builtin else {
+        return Err(anyhow!(
+            "内置插件缺少 builtin 桥接声明: {}",
+            plugin.manifest.id
+        ));
+    };
+
+    if !spec
+        .host_commands
+        .iter()
+        .any(|command| command == command_id)
+    {
+        return Err(anyhow!(
+            "内置插件 {} 未声明宿主命令: {}",
+            plugin.manifest.id,
+            command_id
+        ));
+    }
+
     match (plugin.manifest.id.as_str(), command_id) {
         ("dev.vvicat.system-clipboard", "clipboard.open") => Ok(RpcResult::Text {
             text: "使用 Alt + V 打开系统剪贴板。".into(),
@@ -386,6 +429,26 @@ fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
     }
     if manifest.entry.contains("..") {
         return Err(anyhow!("插件入口不能包含上级目录"));
+    }
+    if manifest.icon.contains("..") {
+        return Err(anyhow!("插件图标路径不能包含上级目录"));
+    }
+    if manifest.runtime == PluginRuntime::Builtin {
+        let spec = manifest
+            .builtin
+            .as_ref()
+            .ok_or_else(|| anyhow!("内置插件必须声明 builtin 配置"))?;
+        if spec.module.trim().is_empty() || spec.bridge.trim().is_empty() {
+            return Err(anyhow!(
+                "内置插件 builtin.module 和 builtin.bridge 不能为空"
+            ));
+        }
+        if spec.module.contains("..") || spec.bridge.contains("..") {
+            return Err(anyhow!("内置插件 builtin 路径不能包含上级目录"));
+        }
+        if spec.host_commands.is_empty() {
+            return Err(anyhow!("内置插件至少需要声明一个宿主命令"));
+        }
     }
     if manifest.commands.is_empty() {
         return Err(anyhow!("插件至少需要声明一个命令"));
