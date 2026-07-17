@@ -325,14 +325,14 @@ pre {
 
 .feature-window {
   display: grid;
-  grid-template-columns: 183px minmax(0, 1fr);
+  grid-template-columns: 184px minmax(0, 1fr);
   background: var(--menu-bg);
 }
 
 .left-menu {
   position: relative;
   height: 100%;
-  padding: 16px;
+  padding: 16px 12px;
   background: var(--menu-bg);
 }
 
@@ -355,18 +355,20 @@ pre {
 .left-menu nav,
 .user-menu {
   display: grid;
-  gap: 4px;
+  gap: 8px;
 }
 
 .left-menu button {
-  height: 40px;
+  height: 44px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 12px;
+  gap: 12px;
+  padding: 0 14px;
   color: var(--text-content);
-  border-radius: 6px;
+  border-radius: 8px;
   text-align: left;
+  font-size: 14px;
+  font-weight: 650;
 }
 
 .left-menu button:hover,
@@ -377,9 +379,9 @@ pre {
 
 .user-menu {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
-  left: 16px;
+  right: 12px;
+  bottom: 14px;
+  left: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--border-light);
 }
@@ -387,7 +389,7 @@ pre {
 .feature-container {
   min-width: 0;
   height: 100%;
-  padding: 16px;
+  padding: 18px 20px;
   overflow: hidden;
   background: var(--body-bg);
   border-left: 1px solid var(--border-light);
@@ -405,6 +407,100 @@ pre {
   background: #fff;
   border: 1px solid var(--border-light);
   border-radius: 6px;
+}
+
+.market-page {
+  height: calc(100% - 52px);
+  min-width: 0;
+  overflow: auto;
+}
+
+.market-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.market-head .view-title {
+  margin: 0;
+}
+
+.market-head small {
+  color: var(--text-desc);
+  font-size: 12px;
+}
+
+.market-plugin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 14px 28px;
+  padding-bottom: 18px;
+}
+
+.market-plugin-card {
+  min-width: 0;
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto 24px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  text-align: left;
+}
+
+.market-plugin-card:hover,
+.market-plugin-card.active {
+  background: linear-gradient(90deg, rgba(22, 119, 255, 0.06), transparent);
+}
+
+.market-plugin-card strong,
+.market-plugin-card small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.market-plugin-card strong {
+  color: var(--text-content);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.market-plugin-card small {
+  margin-top: 5px;
+  color: var(--text-desc);
+  font-size: 13px;
+}
+
+.market-plugin-card em {
+  color: var(--text-desc);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.market-plugin-card > svg {
+  color: var(--primary);
+}
+
+.market-empty {
+  grid-column: 1 / -1;
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: var(--text-desc);
+  border: 1px dashed var(--border-light);
+  border-radius: 8px;
+  font-size: 13px;
 }
 
 .copycat-topbar {
@@ -1017,7 +1113,7 @@ pre {
 
 .detail-head p,
 .detail-home p,
-.developer-page p {
+.settings-panel p {
   margin: 0;
   color: var(--text-desc);
   font-size: 13px;
@@ -1179,7 +1275,7 @@ pre {
 }
 
 .empty-installed,
-.developer-page {
+.settings-panel {
   height: 100%;
   display: grid;
   place-items: center;
@@ -1189,7 +1285,7 @@ pre {
   text-align: center;
 }
 
-.developer-page {
+.settings-panel {
   align-content: start;
   justify-items: start;
   padding: 22px;
@@ -1199,13 +1295,13 @@ pre {
   border-radius: 8px;
 }
 
-.developer-page h2 {
+.settings-panel h2 {
   margin: 0;
   color: var(--text-primary);
   font-size: 18px;
 }
 
-.developer-page pre {
+.settings-panel pre {
   width: 100%;
 }
 

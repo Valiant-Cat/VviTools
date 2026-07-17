@@ -20,6 +20,24 @@ VviTools 的捆绑内置插件不能只有 `plugin.json`，应包含入口契约
 ### Suggested Action
 后续新增系统级内置能力时，优先采用 `runtime: "builtin"` + `builtin.bridge` + `builtin.host_commands` 的插件目录结构，并确保 `plugins/` 作为 Tauri bundle resource 随正式包分发。
 
+---
+
+## [LRN-20260717-001] launcher
+
+**Logged**: 2026-07-17T04:18:09Z
+**Priority**: medium
+**Status**: pending
+**Area**: frontend
+
+### Summary
+VviTools 首页“推荐”不能展示插件市场、已安装这类导航入口。
+
+### Details
+用户明确纠正“推荐，你显示个已安装和插件市场干毛”。首页推荐区如果没有真实推荐插件，应直接隐藏；插件市场、已安装属于导航能力，应保留在左上角入口或二级页侧栏，不应伪装成推荐内容。
+
+### Suggested Action
+后续恢复推荐区时必须由真实插件推荐数据驱动，例如热门插件、官方精选或新插件；没有数据时不展示推荐区。
+
 ## [LRN-20260710-001] macos
 
 **Logged**: 2026-07-10T05:40:00Z

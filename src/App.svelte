@@ -5,7 +5,6 @@
   import {
     ArrowLeft,
     Box,
-    Bug,
     Check,
     ClipboardList,
     Copy,
@@ -19,7 +18,6 @@
     Star,
     Terminal,
     Trash2,
-    Wrench,
     X,
   } from "lucide-svelte";
 
@@ -85,16 +83,24 @@
 
   type ClipboardFilter = "all" | "text" | "image" | "file" | "favorite";
 
-  type View = "launcher" | "finder" | "clipboard" | "installed" | "dev" | "settings";
+  type View = "launcher" | "finder" | "clipboard" | "installed" | "settings";
+  type PluginCategory = "explore" | "efficiency" | "search" | "image" | "developer" | "system" | "custom";
 
   const CLIPBOARD_APP_ID = "dev.vvicat.system-clipboard";
   const params = new URLSearchParams(window.location.search);
   const isClipboardWindow = params.get("window") === "clipboard";
-  const categories = [
-    { view: "finder" as const, label: "插件市场" },
+  const pluginCategories: Array<{ key: PluginCategory; label: string }> = [
+    { key: "explore", label: "探索" },
+    { key: "efficiency", label: "效率" },
+    { key: "search", label: "搜索工具" },
+    { key: "image", label: "图像" },
+    { key: "developer", label: "开发者" },
+    { key: "system", label: "系统" },
+    { key: "custom", label: "自定义插件" },
   ];
 
   let view: View = isClipboardWindow ? "clipboard" : params.get("view") === "finder" ? "finder" : "launcher";
+  let selectedPluginCategory: PluginCategory = "explore";
   let query = "";
   let selectedIndex = 0;
   let selectedMarketId = "";
@@ -116,7 +122,7 @@
   let unlistenOpenClipboard: (() => void) | undefined;
 
   $: installedIds = new Set(plugins.map((plugin) => plugin.id));
-  $: filteredMarket = market.filter((item) => matchText(item, query));
+  $: filteredMarket = market.filter((item) => matchText(item, query) && matchesPluginCategory(item, selectedPluginCategory));
   $: filteredPlugins = plugins.filter((plugin) => matchText(plugin, query));
   $: filteredClipboardItems = clipboardItems.filter(
     (item) =>
@@ -126,6 +132,8 @@
   $: marketDetail = filteredMarket.find((item) => item.id === selectedMarketId) ?? filteredMarket[0];
   $: isClipboardApp = marketDetail?.id === CLIPBOARD_APP_ID;
   $: pluginDetail = filteredPlugins.find((plugin) => plugin.id === selectedPluginId) ?? filteredPlugins[0];
+  $: selectedCategoryLabel =
+    pluginCategories.find((category) => category.key === selectedPluginCategory)?.label ?? "探索";
   $: launcherItems = query ? commands : [];
   $: recentItems = commands.slice(0, 8);
   $: visibleCount =
@@ -230,6 +238,13 @@
     }
   }
 
+  async function activateMarketItem(item: MarketplaceEntry) {
+    selectedMarketId = item.id;
+    if (!item.bundled && !installedIds.has(item.id)) {
+      await install(item);
+    }
+  }
+
   async function openFeature(nextView: View = "finder") {
     view = nextView;
     query = "";
@@ -242,6 +257,11 @@
     await tick();
     resetViewport();
     searchInput?.focus();
+  }
+
+  async function openPluginCategory(category: PluginCategory) {
+    selectedPluginCategory = category;
+    await openFeature("finder");
   }
 
   async function backToLauncher() {
@@ -456,6 +476,28 @@
     return [item.preview, item.text, item.copied_at].join(" ").toLowerCase().includes(q);
   }
 
+  function matchesPluginCategory(item: MarketplaceEntry, category: PluginCategory) {
+    if (category === "explore") return true;
+    const text = [item.id, item.name, item.description, item.runtime, item.entry, item.permissions.join(" ")]
+      .join(" ")
+      .toLowerCase();
+    if (category === "system") return item.bundled || text.includes("system") || text.includes("系统");
+    if (category === "developer") return ["node", "shell"].includes(item.runtime) || text.includes("开发");
+    if (category === "image") return text.includes("image") || text.includes("图像") || text.includes("图片");
+    if (category === "search") return text.includes("search") || text.includes("搜索");
+    if (category === "custom") return !item.bundled;
+    return !item.bundled && !text.includes("search") && !text.includes("image");
+  }
+
+  function categoryEmptyText() {
+    if (query) return "没有匹配插件";
+    return `${selectedCategoryLabel} 分类暂无插件`;
+  }
+
+  function isClipboardEntry(item: MarketplaceEntry) {
+    return item.id === CLIPBOARD_APP_ID;
+  }
+
   function clipboardEmptyText() {
     if (query) return "没有匹配记录";
     if (clipboardFilter === "image") return "暂无图片记录";
@@ -515,10 +557,9 @@
 
   function featureTitle() {
     if (view === "installed") return "已安装";
-    if (view === "dev") return "开发者";
     if (view === "settings") return "设置";
     if (view === "clipboard") return "剪贴板";
-    return query ? "搜索结果" : "插件市场";
+    return selectedCategoryLabel;
   }
 
   refreshAll();
@@ -742,22 +783,8 @@
               </button>
             {/each}
             {#if recentItems.length === 0}
-              <div class="empty-section">安装或运行插件后会显示在这里</div>
+              <div class="empty-section">输入关键词搜索插件，或点击左上角进入插件市场</div>
             {/if}
-          </div>
-        </div>
-
-        <div class="launcher-section">
-          <div class="section-title">推荐</div>
-          <div class="history-grid">
-            <button class="history-item market-entry" on:click={() => openFeature("finder")} type="button">
-              <span class="app-avatar"><PackageSearch size={20} /></span>
-              <span>插件市场</span>
-            </button>
-            <button class="history-item market-entry" on:click={() => openFeature("installed")} type="button">
-              <span class="app-avatar"><Heart size={20} /></span>
-              <span>已安装</span>
-            </button>
           </div>
         </div>
       </section>
@@ -771,10 +798,19 @@
         搜索
       </button>
       <nav>
-        {#each categories as item}
-          <button class:active={view === item.view} on:click={() => openFeature(item.view)} type="button">
-            {#if item.view === "finder"}<Star size={16} />{/if}
-            {#if item.view === "clipboard"}<ClipboardList size={16} />{/if}
+        {#each pluginCategories as item}
+          <button
+            class:active={view === "finder" && selectedPluginCategory === item.key}
+            on:click={() => openPluginCategory(item.key)}
+            type="button"
+          >
+            {#if item.key === "explore"}<Star size={16} />{/if}
+            {#if item.key === "efficiency"}<Play size={16} />{/if}
+            {#if item.key === "search"}<Search size={16} />{/if}
+            {#if item.key === "image"}<Box size={16} />{/if}
+            {#if item.key === "developer"}<Terminal size={16} />{/if}
+            {#if item.key === "system"}<ClipboardList size={16} />{/if}
+            {#if item.key === "custom"}<PackageSearch size={16} />{/if}
             {item.label}
           </button>
         {/each}
@@ -783,10 +819,6 @@
         <button class:active={view === "installed"} on:click={() => (view = "installed")} type="button">
           <Heart size={16} />
           已安装
-        </button>
-        <button class:active={view === "dev"} on:click={() => (view = "dev")} type="button">
-          <Bug size={16} />
-          开发者
         </button>
         <button class:active={view === "settings"} on:click={openSettings} type="button">
           <Settings size={16} />
@@ -811,88 +843,38 @@
       </div>
 
       {#if view === "finder"}
-        <div class="view-title">{featureTitle()}</div>
-        <div class="market-layout">
-          <div class="market-list">
+        <div class="market-page">
+          <div class="market-head">
+            <div class="view-title">{featureTitle()}</div>
+            <small>{query ? "搜索当前分类" : "当前标签下的插件"}</small>
+          </div>
+          <div class="market-plugin-grid">
             {#each filteredMarket as item}
               <button
                 class:active={marketDetail?.id === item.id}
-                class="plugin-card"
-                on:click={() => (selectedMarketId = item.id)}
+                class="market-plugin-card"
+                on:click={() => activateMarketItem(item)}
                 type="button"
               >
-                <span class="plugin-icon">{initials(item.name)}</span>
-                <span class="plugin-copy">
+                <span class="plugin-icon large">
+                  {#if isClipboardEntry(item)}<ClipboardList size={24} />{:else}{initials(item.name)}{/if}
+                </span>
+                <span>
                   <strong>{item.name}</strong>
                   <small>{item.description}</small>
                 </span>
-                {#if installedIds.has(item.id)}
-                  <Check size={17} />
+                <em>{item.bundled ? "内置" : item.runtime || "插件"}</em>
+                {#if isClipboardEntry(item) || installedIds.has(item.id)}
+                  <Check size={18} />
                 {:else}
-                  <DownloadCloud size={18} />
+                  <DownloadCloud size={19} />
                 {/if}
               </button>
             {/each}
-          </div>
-
-          <article class="plugin-detail">
-            {#if marketDetail}
-              <div class="detail-head">
-                <span class="plugin-icon large">
-                  {#if isClipboardApp}<ClipboardList size={26} />{:else}{initials(marketDetail.name)}{/if}
-                </span>
-                <div>
-                  <h2>{marketDetail.name}</h2>
-                  <p>{marketDetail.description}</p>
-                </div>
-              </div>
-              <div class="detail-meta">
-                <span>版本 {marketDetail.version}</span>
-                <span>权限 {marketDetail.permissions.join("、") || "无"}</span>
-                <span>{marketDetail.bundled ? "捆绑内置" : "JSON-RPC · zip"}</span>
-                <span>{marketDetail.runtime || "node"} · {marketDetail.entry || "main.js"}</span>
-              </div>
-              <div class="detail-home">
-                {#if isClipboardApp}
-                  <h3>剪切板</h3>
-                  <p>该工具是随应用分发的捆绑内置插件，插件目录声明入口、图标、权限和宿主桥接；高权限剪贴板能力由 Rust 宿主执行。使用 Alt + V 会打开独立底部剪贴板窗口。</p>
-                  <div class="clipboard-product-preview">
-                    <div class="preview-toolbar">
-                      <span>Clipboard</span>
-                      <em>搜索</em>
-                      <ClipboardList size={24} />
-                    </div>
-                    <div class="preview-tabs">
-                      <span>全部</span>
-                      <span>文本</span>
-                      <span>文件</span>
-                      <span>图片</span>
-                    </div>
-                    <div class="preview-row">
-                      <strong>OpenVibeCoding</strong>
-                      <small>刚刚 · 14 字符</small>
-                    </div>
-                    <div class="preview-row">
-                      <strong>https://github.com/TencentCloudBase/OpenVibeCoding</strong>
-                      <small>刚刚 · 50 字符</small>
-                    </div>
-                  </div>
-                {:else}
-                  <h3>插件主页</h3>
-                  <p>这是静态插件市场条目。安装前会展示 manifest 权限，安装后插件命令会回到主搜索框。</p>
-                {/if}
-              </div>
-              <button
-                class="primary"
-                disabled={isClipboardApp || installedIds.has(marketDetail.id) || loading}
-                on:click={() => install(marketDetail)}
-                type="button"
-              >
-                {#if loading}<Loader2 class="spin" size={16} />{/if}
-                {isClipboardApp ? "已内置" : installedIds.has(marketDetail.id) ? "已安装" : "安装"}
-              </button>
+            {#if filteredMarket.length === 0}
+              <div class="market-empty">{categoryEmptyText()}</div>
             {/if}
-          </article>
+          </div>
         </div>
       {:else if view === "installed"}
         <div class="view-title">已安装</div>
@@ -942,21 +924,9 @@
             {/if}
           </article>
         </div>
-      {:else if view === "dev"}
-        <div class="view-title">开发者</div>
-        <section class="developer-page">
-          <Wrench size={34} />
-          <h2>本地插件调试</h2>
-          <p>第一版使用 `plugin.json` 声明插件，支持 shell 和 node 运行时，入口脚本通过 `VVITOOLS_RPC_INPUT` 接收 JSON-RPC 请求。</p>
-          <pre>{`{
-  "runtime": "node",
-  "entry": "main.js",
-  "permissions": ["clipboard"]
-}`}</pre>
-        </section>
       {:else}
         <div class="view-title">设置</div>
-        <section class="developer-page settings-page">
+        <section class="settings-panel settings-page">
           <Settings size={34} />
           <h2>应用设置</h2>
           <div class="settings-list">
