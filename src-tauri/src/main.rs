@@ -46,8 +46,8 @@ fn main() {
             commands::set_launcher_view,
             commands::is_autostart_enabled,
             commands::set_autostart_enabled,
-            commands::is_status_bar_mode_enabled,
-            commands::set_status_bar_mode_enabled
+            commands::is_dock_visible_enabled,
+            commands::set_dock_visible_enabled
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "clipboard")
@@ -163,7 +163,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .build(app)?;
 
     app.manage(tray);
-    let _ = commands::apply_status_bar_mode(app, commands::load_status_bar_mode_setting());
+    let _ = commands::apply_dock_visibility(app, commands::load_dock_visible_setting());
     Ok(())
 }
 

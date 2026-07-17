@@ -121,8 +121,8 @@
   let customImportStatus = "";
   let autostartEnabled = false;
   let autostartLoading = false;
-  let statusBarModeEnabled = true;
-  let statusBarModeLoading = false;
+  let dockVisibleEnabled = false;
+  let dockVisibleLoading = false;
   let searchInput: HTMLInputElement;
   let clipboardBoard: HTMLElement;
   let customFileInput: HTMLInputElement;
@@ -180,9 +180,9 @@
     }
   }
 
-  async function loadStatusBarModeStatus() {
+  async function loadDockVisibleStatus() {
     try {
-      statusBarModeEnabled = await invoke<boolean>("is_status_bar_mode_enabled");
+      dockVisibleEnabled = await invoke<boolean>("is_dock_visible_enabled");
     } catch (err) {
       error = String(err);
     }
@@ -412,7 +412,7 @@
     error = "";
     clipboardStatus = "";
     await loadAutostartStatus();
-    await loadStatusBarModeStatus();
+    await loadDockVisibleStatus();
     await tick();
     resetViewport();
     searchInput?.focus();
@@ -434,19 +434,19 @@
     }
   }
 
-  async function toggleStatusBarMode() {
-    if (statusBarModeLoading) return;
-    statusBarModeLoading = true;
+  async function toggleDockVisible() {
+    if (dockVisibleLoading) return;
+    dockVisibleLoading = true;
     error = "";
     try {
-      statusBarModeEnabled = await invoke<boolean>("set_status_bar_mode_enabled", {
-        request: { enabled: !statusBarModeEnabled },
+      dockVisibleEnabled = await invoke<boolean>("set_dock_visible_enabled", {
+        request: { enabled: !dockVisibleEnabled },
       });
     } catch (err) {
       error = String(err);
-      await loadStatusBarModeStatus();
+      await loadDockVisibleStatus();
     } finally {
-      statusBarModeLoading = false;
+      dockVisibleLoading = false;
     }
   }
 
@@ -1147,21 +1147,21 @@
             </div>
             <div class="settings-row">
               <span>
-                <strong>状态栏运行</strong>
-                <small>隐藏 Dock 图标，保留状态栏入口和快捷键呼出。</small>
+                <strong>Dock 栏显示</strong>
+                <small>开启后在 Dock 中显示图标；关闭后仅保留状态栏入口和快捷键呼出。</small>
               </span>
               <button
                 class="settings-switch"
-                class:enabled={statusBarModeEnabled}
-                disabled={statusBarModeLoading}
-                aria-pressed={statusBarModeEnabled}
-                on:click={toggleStatusBarMode}
+                class:enabled={dockVisibleEnabled}
+                disabled={dockVisibleLoading}
+                aria-pressed={dockVisibleEnabled}
+                on:click={toggleDockVisible}
                 type="button"
               >
-                {#if statusBarModeLoading}
+                {#if dockVisibleLoading}
                   <Loader2 class="spin" size={14} />
                 {:else}
-                  <span class="sr-only">{statusBarModeEnabled ? "已开启" : "已关闭"}</span>
+                  <span class="sr-only">{dockVisibleEnabled ? "已开启" : "已关闭"}</span>
                   <span class="settings-switch-thumb"></span>
                 {/if}
               </button>

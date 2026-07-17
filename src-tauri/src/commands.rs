@@ -79,14 +79,24 @@ pub struct AutostartRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct StatusBarModeRequest {
+pub struct DockVisibilityRequest {
     pub enabled: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct AppSettings {
-    #[serde(default = "default_status_bar_mode")]
-    status_bar_mode: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dock_visible: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status_bar_mode: Option<bool>,
+}
+
+impl AppSettings {
+    fn dock_visible(&self) -> bool {
+        self.dock_visible
+            .or_else(|| self.status_bar_mode.map(|enabled| !enabled))
+            .unwrap_or_else(default_dock_visible)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,18 +166,19 @@ pub fn set_autostart_enabled(
 }
 
 #[tauri::command]
-pub fn is_status_bar_mode_enabled() -> Result<bool, String> {
-    Ok(load_app_settings().map_err(to_message)?.status_bar_mode)
+pub fn is_dock_visible_enabled() -> Result<bool, String> {
+    Ok(load_app_settings().map_err(to_message)?.dock_visible())
 }
 
 #[tauri::command]
-pub fn set_status_bar_mode_enabled(
+pub fn set_dock_visible_enabled(
     app: AppHandle,
-    request: StatusBarModeRequest,
+    request: DockVisibilityRequest,
 ) -> Result<bool, String> {
-    apply_status_bar_mode(&app, request.enabled)?;
+    apply_dock_visibility(&app, request.enabled)?;
     let mut settings = load_app_settings().map_err(to_message)?;
-    settings.status_bar_mode = request.enabled;
+    settings.dock_visible = Some(request.enabled);
+    settings.status_bar_mode = None;
     save_app_settings(&settings).map_err(to_message)?;
     Ok(request.enabled)
 }
@@ -806,27 +817,27 @@ fn clipboard_history_path() -> PathBuf {
         .join("history.json")
 }
 
-pub fn load_status_bar_mode_setting() -> bool {
+pub fn load_dock_visible_setting() -> bool {
     load_app_settings()
-        .map(|settings| settings.status_bar_mode)
-        .unwrap_or_else(|_| default_status_bar_mode())
+        .map(|settings| settings.dock_visible())
+        .unwrap_or_else(|_| default_dock_visible())
 }
 
-pub fn apply_status_bar_mode(app: &AppHandle, enabled: bool) -> Result<(), String> {
+pub fn apply_dock_visibility(app: &AppHandle, enabled: bool) -> Result<(), String> {
     if let Some(tray) = app.tray_by_id("vvitools") {
-        tray.set_visible(enabled).map_err(to_message)?;
+        tray.set_visible(true).map_err(to_message)?;
     }
 
     #[cfg(target_os = "macos")]
     {
         if enabled {
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory)
-                .map_err(to_message)?;
-            app.set_dock_visibility(false).map_err(to_message)?;
-        } else {
             app.set_activation_policy(tauri::ActivationPolicy::Regular)
                 .map_err(to_message)?;
             app.set_dock_visibility(true).map_err(to_message)?;
+        } else {
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory)
+                .map_err(to_message)?;
+            app.set_dock_visibility(false).map_err(to_message)?;
         }
     }
 
@@ -858,8 +869,8 @@ fn app_settings_path() -> PathBuf {
         .join("settings.json")
 }
 
-fn default_status_bar_mode() -> bool {
-    true
+fn default_dock_visible() -> bool {
+    false
 }
 
 fn clipboard_images_dir() -> PathBuf {
