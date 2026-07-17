@@ -7,6 +7,7 @@ use tauri::{
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, WebviewWindow, WindowEvent,
 };
+use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 const TRAY_TOGGLE_ID: &str = "toggle";
@@ -16,6 +17,10 @@ const TRAY_QUIT_ID: &str = "quit";
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
@@ -38,7 +43,9 @@ fn main() {
             commands::open_clipboard_window,
             commands::hide_launcher,
             commands::hide_window,
-            commands::set_launcher_view
+            commands::set_launcher_view,
+            commands::is_autostart_enabled,
+            commands::set_autostart_enabled
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "clipboard")

@@ -119,6 +119,8 @@
   let customImportMode: "local" | "remote" = "local";
   let customRemoteUrl = "";
   let customImportStatus = "";
+  let autostartEnabled = false;
+  let autostartLoading = false;
   let searchInput: HTMLInputElement;
   let clipboardBoard: HTMLElement;
   let customFileInput: HTMLInputElement;
@@ -163,6 +165,14 @@
       await searchCommands();
       selectedMarketId ||= market[0]?.id ?? "";
       selectedPluginId ||= plugins[0]?.id ?? "";
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
+  async function loadAutostartStatus() {
+    try {
+      autostartEnabled = await invoke<boolean>("is_autostart_enabled");
     } catch (err) {
       error = String(err);
     }
@@ -391,9 +401,26 @@
     resultPluginId = "";
     error = "";
     clipboardStatus = "";
+    await loadAutostartStatus();
     await tick();
     resetViewport();
     searchInput?.focus();
+  }
+
+  async function toggleAutostart() {
+    if (autostartLoading) return;
+    autostartLoading = true;
+    error = "";
+    try {
+      autostartEnabled = await invoke<boolean>("set_autostart_enabled", {
+        request: { enabled: !autostartEnabled },
+      });
+    } catch (err) {
+      error = String(err);
+      await loadAutostartStatus();
+    } finally {
+      autostartLoading = false;
+    }
   }
 
   async function loadClipboardHistory() {
@@ -1070,6 +1097,26 @@
           <Settings size={34} />
           <h2>应用设置</h2>
           <div class="settings-list">
+            <div class="settings-row">
+              <span>
+                <strong>开机启动</strong>
+                <small>登录系统后自动启动 VviTools，保留状态栏入口和快捷键。</small>
+              </span>
+              <button
+                class="settings-switch"
+                class:enabled={autostartEnabled}
+                disabled={autostartLoading}
+                aria-pressed={autostartEnabled}
+                on:click={toggleAutostart}
+                type="button"
+              >
+                {#if autostartLoading}
+                  <Loader2 class="spin" size={14} />
+                {:else}
+                  {autostartEnabled ? "已开启" : "已关闭"}
+                {/if}
+              </button>
+            </div>
             <div class="settings-row">
               <span>
                 <strong>状态栏运行</strong>

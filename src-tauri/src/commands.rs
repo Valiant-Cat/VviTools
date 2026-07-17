@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Digest;
 use tauri::{Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow};
+use tauri_plugin_autostart::ManagerExt;
 use vvitools_core::plugin::{
     bundled_plugins_dir, default_plugins_dir, delete_user_plugin, ensure_action_allowed,
     install_plugin_from_zip, install_plugin_manifest, load_available_plugins_from, load_plugins,
@@ -71,6 +72,11 @@ pub struct DeletePluginRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct AutostartRequest {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum CustomPluginConfig {
     Single(PluginManifest),
@@ -116,6 +122,24 @@ pub fn list_plugins(app: tauri::AppHandle) -> Result<Vec<PluginView>, String> {
         .map(plugin_to_view)
         .collect::<Vec<_>>()
         .pipe(Ok)
+}
+
+#[tauri::command]
+pub fn is_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(to_message)
+}
+
+#[tauri::command]
+pub fn set_autostart_enabled(
+    app: tauri::AppHandle,
+    request: AutostartRequest,
+) -> Result<bool, String> {
+    if request.enabled {
+        app.autolaunch().enable().map_err(to_message)?;
+    } else {
+        app.autolaunch().disable().map_err(to_message)?;
+    }
+    app.autolaunch().is_enabled().map_err(to_message)
 }
 
 #[tauri::command]
