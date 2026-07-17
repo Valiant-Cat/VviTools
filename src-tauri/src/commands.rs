@@ -19,7 +19,7 @@ use vvitools_core::plugin::{
     bundled_plugins_dir, default_plugins_dir, delete_user_plugin, ensure_action_allowed,
     install_plugin_from_zip, install_plugin_manifest, load_available_plugins_from, load_plugins,
     run_plugin_command, search_commands, CommandInput, CommandMatch, InstalledPlugin,
-    MarketplaceEntry, PermissionDecision, PluginManifest, RpcAction, RpcResult,
+    MarketplaceEntry, PermissionDecision, PluginManifest, PluginRuntime, RpcAction, RpcResult,
 };
 
 #[derive(Debug, Serialize)]
@@ -804,7 +804,8 @@ fn clipboard_files_preview(file_paths: &[String]) -> String {
 
 fn plugin_to_view(plugin: InstalledPlugin) -> PluginView {
     let bundled_root = bundled_plugins_dir();
-    let bundled = plugin.dir.starts_with(&bundled_root);
+    let bundled =
+        plugin.manifest.runtime == PluginRuntime::Builtin || plugin.dir.starts_with(&bundled_root);
     PluginView {
         id: plugin.manifest.id,
         name: plugin.manifest.name,
