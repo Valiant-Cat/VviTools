@@ -1113,7 +1113,8 @@
                 {#if autostartLoading}
                   <Loader2 class="spin" size={14} />
                 {:else}
-                  {autostartEnabled ? "已开启" : "已关闭"}
+                  <span class="sr-only">{autostartEnabled ? "已开启" : "已关闭"}</span>
+                  <span class="settings-switch-thumb"></span>
                 {/if}
               </button>
             </div>
