@@ -14,7 +14,9 @@ use image::{ImageBuffer, RgbaImage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Digest;
-use tauri::{Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow};
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow,
+};
 use tauri_plugin_autostart::ManagerExt;
 use vvitools_core::plugin::{
     bundled_plugins_dir, default_plugins_dir, delete_user_plugin, ensure_action_allowed,
@@ -74,6 +76,17 @@ pub struct DeletePluginRequest {
 #[derive(Debug, Deserialize)]
 pub struct AutostartRequest {
     pub enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StatusBarModeRequest {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct AppSettings {
+    #[serde(default = "default_status_bar_mode")]
+    status_bar_mode: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +153,23 @@ pub fn set_autostart_enabled(
         app.autolaunch().disable().map_err(to_message)?;
     }
     app.autolaunch().is_enabled().map_err(to_message)
+}
+
+#[tauri::command]
+pub fn is_status_bar_mode_enabled() -> Result<bool, String> {
+    Ok(load_app_settings().map_err(to_message)?.status_bar_mode)
+}
+
+#[tauri::command]
+pub fn set_status_bar_mode_enabled(
+    app: AppHandle,
+    request: StatusBarModeRequest,
+) -> Result<bool, String> {
+    apply_status_bar_mode(&app, request.enabled)?;
+    let mut settings = load_app_settings().map_err(to_message)?;
+    settings.status_bar_mode = request.enabled;
+    save_app_settings(&settings).map_err(to_message)?;
+    Ok(request.enabled)
 }
 
 #[tauri::command]
@@ -774,6 +804,62 @@ fn clipboard_history_path() -> PathBuf {
         .join("VviTools")
         .join("clipboard")
         .join("history.json")
+}
+
+pub fn load_status_bar_mode_setting() -> bool {
+    load_app_settings()
+        .map(|settings| settings.status_bar_mode)
+        .unwrap_or_else(|_| default_status_bar_mode())
+}
+
+pub fn apply_status_bar_mode(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    if let Some(tray) = app.tray_by_id("vvitools") {
+        tray.set_visible(enabled).map_err(to_message)?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if enabled {
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory)
+                .map_err(to_message)?;
+            app.set_dock_visibility(false).map_err(to_message)?;
+        } else {
+            app.set_activation_policy(tauri::ActivationPolicy::Regular)
+                .map_err(to_message)?;
+            app.set_dock_visibility(true).map_err(to_message)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn load_app_settings() -> Result<AppSettings, Box<dyn std::error::Error>> {
+    let path = app_settings_path();
+    if !path.exists() {
+        return Ok(AppSettings::default());
+    }
+    let data = fs::read(path)?;
+    Ok(serde_json::from_slice(&data)?)
+}
+
+fn save_app_settings(settings: &AppSettings) -> Result<(), Box<dyn std::error::Error>> {
+    let path = app_settings_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_vec_pretty(settings)?)?;
+    Ok(())
+}
+
+fn app_settings_path() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("VviTools")
+        .join("settings.json")
+}
+
+fn default_status_bar_mode() -> bool {
+    true
 }
 
 fn clipboard_images_dir() -> PathBuf {

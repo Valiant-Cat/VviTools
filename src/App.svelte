@@ -121,6 +121,8 @@
   let customImportStatus = "";
   let autostartEnabled = false;
   let autostartLoading = false;
+  let statusBarModeEnabled = true;
+  let statusBarModeLoading = false;
   let searchInput: HTMLInputElement;
   let clipboardBoard: HTMLElement;
   let customFileInput: HTMLInputElement;
@@ -173,6 +175,14 @@
   async function loadAutostartStatus() {
     try {
       autostartEnabled = await invoke<boolean>("is_autostart_enabled");
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
+  async function loadStatusBarModeStatus() {
+    try {
+      statusBarModeEnabled = await invoke<boolean>("is_status_bar_mode_enabled");
     } catch (err) {
       error = String(err);
     }
@@ -402,6 +412,7 @@
     error = "";
     clipboardStatus = "";
     await loadAutostartStatus();
+    await loadStatusBarModeStatus();
     await tick();
     resetViewport();
     searchInput?.focus();
@@ -420,6 +431,22 @@
       await loadAutostartStatus();
     } finally {
       autostartLoading = false;
+    }
+  }
+
+  async function toggleStatusBarMode() {
+    if (statusBarModeLoading) return;
+    statusBarModeLoading = true;
+    error = "";
+    try {
+      statusBarModeEnabled = await invoke<boolean>("set_status_bar_mode_enabled", {
+        request: { enabled: !statusBarModeEnabled },
+      });
+    } catch (err) {
+      error = String(err);
+      await loadStatusBarModeStatus();
+    } finally {
+      statusBarModeLoading = false;
     }
   }
 
@@ -1123,7 +1150,21 @@
                 <strong>状态栏运行</strong>
                 <small>隐藏 Dock 图标，保留状态栏入口和快捷键呼出。</small>
               </span>
-              <em>已开启</em>
+              <button
+                class="settings-switch"
+                class:enabled={statusBarModeEnabled}
+                disabled={statusBarModeLoading}
+                aria-pressed={statusBarModeEnabled}
+                on:click={toggleStatusBarMode}
+                type="button"
+              >
+                {#if statusBarModeLoading}
+                  <Loader2 class="spin" size={14} />
+                {:else}
+                  <span class="sr-only">{statusBarModeEnabled ? "已开启" : "已关闭"}</span>
+                  <span class="settings-switch-thumb"></span>
+                {/if}
+              </button>
             </div>
             <div class="settings-row">
               <span>

@@ -45,7 +45,9 @@ fn main() {
             commands::hide_window,
             commands::set_launcher_view,
             commands::is_autostart_enabled,
-            commands::set_autostart_enabled
+            commands::set_autostart_enabled,
+            commands::is_status_bar_mode_enabled,
+            commands::set_status_bar_mode_enabled
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "clipboard")
@@ -140,12 +142,6 @@ fn toggle_launcher(app: &AppHandle) {
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-        let _ = app.set_dock_visibility(false);
-    }
-
     let toggle = MenuItem::with_id(app, TRAY_TOGGLE_ID, "显示/隐藏", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, TRAY_SETTINGS_ID, "设置", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, TRAY_QUIT_ID, "退出", true, None::<&str>)?;
@@ -167,6 +163,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .build(app)?;
 
     app.manage(tray);
+    let _ = commands::apply_status_bar_mode(app, commands::load_status_bar_mode_setting());
     Ok(())
 }
 
