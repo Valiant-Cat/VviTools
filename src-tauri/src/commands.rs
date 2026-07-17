@@ -16,9 +16,10 @@ use serde_json::Value;
 use sha2::Digest;
 use tauri::{Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow};
 use vvitools_core::plugin::{
-    bundled_plugins_dir, default_plugins_dir, ensure_action_allowed, install_plugin_from_zip,
-    load_available_plugins_from, load_plugins, run_plugin_command, search_commands, CommandInput,
-    CommandMatch, InstalledPlugin, MarketplaceEntry, PermissionDecision, RpcAction, RpcResult,
+    bundled_plugins_dir, default_plugins_dir, delete_user_plugin, ensure_action_allowed,
+    install_plugin_from_zip, install_plugin_manifest, load_available_plugins_from, load_plugins,
+    run_plugin_command, search_commands, CommandInput, CommandMatch, InstalledPlugin,
+    MarketplaceEntry, PermissionDecision, PluginManifest, RpcAction, RpcResult,
 };
 
 #[derive(Debug, Serialize)]
@@ -54,6 +55,27 @@ pub struct InstallRequest {
 pub struct ActionRequest {
     pub plugin_id: String,
     pub action: RpcAction,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CustomPluginImportRequest {
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub url: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeletePluginRequest {
+    pub plugin_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum CustomPluginConfig {
+    Single(PluginManifest),
+    List(Vec<PluginManifest>),
+    Object { plugins: Vec<PluginManifest> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -345,6 +367,45 @@ pub fn install_marketplace_plugin(request: InstallRequest) -> Result<PluginView,
     install_plugin_from_zip(&request.entry, &default_plugins_dir(), decision)
         .map(plugin_to_view)
         .map_err(to_message)
+}
+
+#[tauri::command]
+pub fn import_custom_plugin_config(
+    request: CustomPluginImportRequest,
+) -> Result<Vec<PluginView>, String> {
+    let raw = if !request.content.trim().is_empty() {
+        request.content
+    } else if !request.url.trim().is_empty() {
+        reqwest::blocking::get(request.url.trim())
+            .map_err(to_message)?
+            .error_for_status()
+            .map_err(to_message)?
+            .text()
+            .map_err(to_message)?
+    } else {
+        return Err("请选择本地 JSON 文件或输入远程 URL".into());
+    };
+
+    let config: CustomPluginConfig = serde_json::from_str(&raw).map_err(to_message)?;
+    let manifests = match config {
+        CustomPluginConfig::Single(manifest) => vec![manifest],
+        CustomPluginConfig::List(manifests) => manifests,
+        CustomPluginConfig::Object { plugins } => plugins,
+    };
+    if manifests.is_empty() {
+        return Err("配置文件中没有插件".into());
+    }
+
+    manifests
+        .into_iter()
+        .map(|manifest| install_plugin_manifest(manifest, &default_plugins_dir()))
+        .map(|result| result.map(plugin_to_view).map_err(to_message))
+        .collect()
+}
+
+#[tauri::command]
+pub fn delete_custom_plugin(request: DeletePluginRequest) -> Result<(), String> {
+    delete_user_plugin(&request.plugin_id, &default_plugins_dir()).map_err(to_message)
 }
 
 #[tauri::command]

@@ -1274,6 +1274,168 @@ pre {
   font-size: 13px;
 }
 
+.hidden-file-input {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.custom-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.custom-actions button,
+.import-dialog button,
+.local-import-row button {
+  border: 0;
+  cursor: pointer;
+}
+
+.import-button,
+.delete-button,
+.secondary {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 18px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.import-button {
+  color: #fff;
+  background: #ef4ca2;
+}
+
+.delete-button {
+  color: #fff;
+  background: #e96543;
+}
+
+.secondary {
+  color: var(--text-content);
+  background: #fff;
+  border: 1px solid #d9d9d9 !important;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.import-dialog {
+  width: min(640px, calc(100vw - 64px));
+  min-height: 420px;
+  display: grid;
+  grid-template-rows: 70px minmax(0, 1fr) 64px;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28);
+}
+
+.import-dialog header,
+.import-dialog footer {
+  display: flex;
+  align-items: center;
+}
+
+.import-dialog header {
+  justify-content: space-between;
+  padding: 0 30px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.import-dialog h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.import-dialog header button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: var(--text-desc);
+  background: transparent;
+}
+
+.import-body {
+  padding: 28px 30px;
+}
+
+.import-note {
+  margin: 0 0 18px;
+  padding: 14px 18px;
+  color: var(--text-primary);
+  background: #fffff0;
+  border: 1px solid #f0f0d8;
+  border-radius: 4px;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.import-mode,
+.local-import-row,
+.remote-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.import-mode label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.import-mode input {
+  width: 16px;
+  height: 16px;
+  accent-color: #ef4ca2;
+}
+
+.remote-field input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  outline: 0;
+}
+
+.import-error {
+  margin-top: 16px;
+  color: #cf1322;
+  font-size: 13px;
+}
+
+.import-dialog footer {
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 30px;
+  border-top: 1px solid var(--border-light);
+}
+
 .empty-installed,
 .settings-panel {
   height: 100%;

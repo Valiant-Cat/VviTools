@@ -32,6 +32,8 @@ fn main() {
             commands::clear_clipboard_history,
             commands::load_marketplace,
             commands::install_marketplace_plugin,
+            commands::import_custom_plugin_config,
+            commands::delete_custom_plugin,
             commands::open_external,
             commands::open_clipboard_window,
             commands::hide_launcher,

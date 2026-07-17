@@ -204,6 +204,48 @@ pub fn load_plugins(root: &Path) -> Result<Vec<InstalledPlugin>> {
     Ok(plugins)
 }
 
+pub fn install_plugin_manifest(
+    manifest: PluginManifest,
+    target_root: &Path,
+) -> Result<InstalledPlugin> {
+    validate_manifest(&manifest)?;
+    if manifest.runtime == PluginRuntime::Builtin {
+        return Err(anyhow!("自定义插件暂不允许导入 builtin 运行时"));
+    }
+
+    fs::create_dir_all(target_root)
+        .with_context(|| format!("创建插件目录失败: {}", target_root.display()))?;
+    let install_dir = target_root.join(&manifest.id);
+    if install_dir.exists() {
+        fs::remove_dir_all(&install_dir)
+            .with_context(|| format!("清理旧插件目录失败: {}", install_dir.display()))?;
+    }
+    fs::create_dir_all(&install_dir)
+        .with_context(|| format!("创建插件目录失败: {}", install_dir.display()))?;
+    fs::write(
+        install_dir.join("plugin.json"),
+        serde_json::to_vec_pretty(&manifest)?,
+    )
+    .with_context(|| format!("写入插件清单失败: {}", install_dir.display()))?;
+
+    Ok(InstalledPlugin {
+        manifest,
+        dir: install_dir,
+    })
+}
+
+pub fn delete_user_plugin(plugin_id: &str, target_root: &Path) -> Result<()> {
+    if plugin_id.trim().is_empty() || plugin_id.contains("..") || plugin_id.contains('/') {
+        return Err(anyhow!("插件 id 不合法"));
+    }
+    let plugin_dir = target_root.join(plugin_id);
+    if !plugin_dir.exists() {
+        return Err(anyhow!("自定义插件不存在: {}", plugin_id));
+    }
+    fs::remove_dir_all(&plugin_dir)
+        .with_context(|| format!("删除插件目录失败: {}", plugin_dir.display()))
+}
+
 pub fn search_commands(plugins: &[InstalledPlugin], query: &str) -> Vec<CommandMatch> {
     let q = query.trim().to_lowercase();
     let mut matches = Vec::new();

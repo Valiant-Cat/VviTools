@@ -115,14 +115,23 @@
   let error = "";
   let clipboardStatus = "";
   let clipboardFilter: ClipboardFilter = "all";
+  let showCustomImportDialog = false;
+  let customImportMode: "local" | "remote" = "local";
+  let customRemoteUrl = "";
+  let customImportStatus = "";
   let searchInput: HTMLInputElement;
   let clipboardBoard: HTMLElement;
+  let customFileInput: HTMLInputElement;
   let unlistenShowLauncher: (() => void) | undefined;
   let unlistenOpenSettings: (() => void) | undefined;
   let unlistenOpenClipboard: (() => void) | undefined;
 
   $: installedIds = new Set(plugins.map((plugin) => plugin.id));
-  $: filteredMarket = market.filter((item) => matchText(item, query) && matchesPluginCategory(item, selectedPluginCategory));
+  $: customMarket = plugins.filter((plugin) => !plugin.bundled).map(pluginViewToMarketEntry);
+  $: marketplaceItems = selectedPluginCategory === "custom" ? customMarket : market;
+  $: filteredMarket = marketplaceItems.filter(
+    (item) => matchText(item, query) && matchesPluginCategory(item, selectedPluginCategory)
+  );
   $: filteredPlugins = plugins.filter((plugin) => matchText(plugin, query));
   $: filteredClipboardItems = clipboardItems.filter(
     (item) =>
@@ -235,6 +244,96 @@
       error = String(err);
     } finally {
       loading = false;
+    }
+  }
+
+  function openCustomImportDialog() {
+    customImportStatus = "";
+    customRemoteUrl = "";
+    customImportMode = "local";
+    showCustomImportDialog = true;
+  }
+
+  function closeCustomImportDialog() {
+    showCustomImportDialog = false;
+    customImportStatus = "";
+  }
+
+  async function importCustomPluginContent(content: string) {
+    customImportStatus = "";
+    loading = true;
+    try {
+      await invoke("import_custom_plugin_config", { request: { content } });
+      await refreshAll();
+      selectedPluginCategory = "custom";
+      showCustomImportDialog = false;
+    } catch (err) {
+      customImportStatus = String(err);
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function importCustomPluginFromUrl() {
+    customImportStatus = "";
+    if (!customRemoteUrl.trim()) {
+      customImportStatus = "请输入远程 JSON 地址";
+      return;
+    }
+    loading = true;
+    try {
+      await invoke("import_custom_plugin_config", { request: { url: customRemoteUrl.trim() } });
+      await refreshAll();
+      selectedPluginCategory = "custom";
+      showCustomImportDialog = false;
+    } catch (err) {
+      customImportStatus = String(err);
+    } finally {
+      loading = false;
+    }
+  }
+
+  function chooseCustomPluginFile() {
+    customFileInput?.click();
+  }
+
+  async function handleCustomFileSelected(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    await importCustomPluginContent(await file.text());
+  }
+
+  async function confirmCustomPluginImport() {
+    if (customImportMode === "remote") {
+      await importCustomPluginFromUrl();
+      return;
+    }
+    chooseCustomPluginFile();
+  }
+
+  async function deleteSelectedCustomPlugin() {
+    const target = filteredMarket.find((item) => item.id === selectedMarketId) ?? filteredMarket[0];
+    if (!target) {
+      error = "请选择要删除的自定义插件";
+      return;
+    }
+    if (target.bundled) {
+      error = "内置插件不能删除";
+      return;
+    }
+    const approved = window.confirm(`删除自定义插件 ${target.name}？`);
+    if (!approved) return;
+    error = "";
+    try {
+      await invoke("delete_custom_plugin", { request: { plugin_id: target.id } });
+      selectedMarketId = "";
+      selectedPluginId = "";
+      await refreshAll();
+      selectedPluginCategory = "custom";
+    } catch (err) {
+      error = String(err);
     }
   }
 
@@ -470,6 +569,22 @@
       .includes(q);
   }
 
+  function pluginViewToMarketEntry(plugin: PluginView): MarketplaceEntry {
+    return {
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      description: plugin.description,
+      icon: plugin.icon,
+      runtime: plugin.runtime,
+      entry: plugin.entry,
+      bundled: plugin.bundled,
+      download_url: "",
+      sha256: null,
+      permissions: plugin.permissions,
+    };
+  }
+
   function matchClipboardText(item: ClipboardItem, value: string) {
     const q = value.trim().toLowerCase();
     if (!q) return true;
@@ -496,6 +611,10 @@
 
   function isClipboardEntry(item: MarketplaceEntry) {
     return item.id === CLIPBOARD_APP_ID;
+  }
+
+  function customImportHelpText() {
+    return "支持导入 VviTools plugin.json，或包含 plugins 数组的 JSON 配置文件。自定义插件支持 node / shell 运行时。";
   }
 
   function clipboardEmptyText() {
@@ -792,6 +911,13 @@
   </main>
 {:else}
   <main class="rubick-window feature-window">
+    <input
+      bind:this={customFileInput}
+      accept="application/json,.json"
+      class="hidden-file-input"
+      on:change={handleCustomFileSelected}
+      type="file"
+    />
     <aside class="left-menu" data-tauri-drag-region>
       <button class="back-mini" on:click={backToLauncher} type="button">
         <ArrowLeft size={16} />
@@ -845,8 +971,22 @@
       {#if view === "finder"}
         <div class="market-page">
           <div class="market-head">
-            <div class="view-title">{featureTitle()}</div>
-            <small>{query ? "搜索当前分类" : "当前标签下的插件"}</small>
+            <div>
+              <div class="view-title">{featureTitle()}</div>
+              <small>{query ? "搜索当前分类" : "当前标签下的插件"}</small>
+            </div>
+            {#if selectedPluginCategory === "custom"}
+              <div class="custom-actions">
+                <button class="import-button" on:click={openCustomImportDialog} type="button">
+                  <DownloadCloud size={17} />
+                  导入配置文件
+                </button>
+                <button class="delete-button" on:click={deleteSelectedCustomPlugin} type="button">
+                  <Trash2 size={17} />
+                  删除插件
+                </button>
+              </div>
+            {/if}
           </div>
           <div class="market-plugin-grid">
             {#each filteredMarket as item}
@@ -955,5 +1095,53 @@
         </section>
       {/if}
     </section>
+
+    {#if showCustomImportDialog}
+      <section class="modal-backdrop">
+        <article class="import-dialog">
+          <header>
+            <h2>导入配置文件</h2>
+            <button aria-label="关闭" on:click={closeCustomImportDialog} type="button"><X size={24} /></button>
+          </header>
+          <div class="import-body">
+            <p class="import-note">{customImportHelpText()}</p>
+            <div class="import-mode">
+              <span>导入方式：</span>
+              <label>
+                <input bind:group={customImportMode} type="radio" value="local" />
+                本地导入
+              </label>
+              <label>
+                <input bind:group={customImportMode} type="radio" value="remote" />
+                远程导入
+              </label>
+            </div>
+            {#if customImportMode === "remote"}
+              <label class="remote-field">
+                <span>远程地址：</span>
+                <input bind:value={customRemoteUrl} placeholder="https://example.com/plugin.json" />
+              </label>
+            {:else}
+              <div class="local-import-row">
+                <span>本地导入：</span>
+                <button class="import-button" on:click={chooseCustomPluginFile} type="button">
+                  <DownloadCloud size={17} />
+                  导入文件
+                </button>
+              </div>
+            {/if}
+            {#if customImportStatus}
+              <div class="import-error">{customImportStatus}</div>
+            {/if}
+          </div>
+          <footer>
+            <button class="secondary" on:click={closeCustomImportDialog} type="button">关闭</button>
+            <button class="import-button" disabled={loading} on:click={confirmCustomPluginImport} type="button">
+              {loading ? "导入中" : "导入"}
+            </button>
+          </footer>
+        </article>
+      </section>
+    {/if}
   </main>
 {/if}
