@@ -489,6 +489,10 @@
     return command.plugin_name;
   }
 
+  function launcherCardName(command: CommandMatch) {
+    return command.plugin_name || command.title || command.keyword;
+  }
+
   function formatClipboardTime(value: string) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
@@ -734,7 +738,7 @@
                 type="button"
               >
                 <span class="app-avatar">{initials(command.plugin_name)}</span>
-                <span>{commandDisplayName(command)}</span>
+                <span>{launcherCardName(command)}</span>
               </button>
             {/each}
             {#if recentItems.length === 0}
