@@ -1,7 +1,6 @@
 use std::{
     borrow::Cow,
     fs,
-    io::Write,
     path::PathBuf,
     process::Command,
     sync::{Mutex, OnceLock},
@@ -418,48 +417,10 @@ pub fn apply_launcher_window(window: &WebviewWindow, view: &str) -> Result<(), S
     Ok(())
 }
 
-pub fn ensure_sample_plugin() -> Result<(), Box<dyn std::error::Error>> {
-    let root = default_plugins_dir();
-    let sample = root.join("dev.vvicat.echo");
-    if sample.join("plugin.json").exists() {
-        return Ok(());
-    }
-    fs::create_dir_all(&sample)?;
-    fs::write(
-        sample.join("plugin.json"),
-        r#"{
-  "id": "dev.vvicat.echo",
-  "name": "回显工具",
-  "version": "1.0.0",
-  "description": "内置示例插件，用于验证 JSON-RPC 执行链路。",
-  "keywords": ["echo", "回显", "test"],
-  "runtime": "shell",
-  "entry": "main.sh",
-  "permissions": [],
-  "commands": [
-    {
-      "id": "echo.run",
-      "title": "回显输入",
-      "keyword": "echo",
-      "input": "text"
-    }
-  ]
-}"#,
-    )?;
-    fs::write(
-        sample.join("main.sh"),
-        r#"#!/bin/sh
-QUERY=$(printf '%s' "$VVITOOLS_RPC_INPUT" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["params"]["query"])' 2>/dev/null)
-printf '{"type":"text","text":"回显：%s"}\n' "$QUERY"
-"#,
-    )?;
-    Ok(())
-}
-
 fn bundled_marketplace(
     bundled_root: &std::path::Path,
 ) -> Result<Vec<MarketplaceEntry>, Box<dyn std::error::Error>> {
-    let mut entries = load_plugins(bundled_root)?
+    let entries = load_plugins(bundled_root)?
         .into_iter()
         .map(|plugin| MarketplaceEntry {
             id: plugin.manifest.id,
@@ -475,71 +436,6 @@ fn bundled_marketplace(
             permissions: plugin.manifest.permissions,
         })
         .collect::<Vec<_>>();
-
-    let dir = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("VviTools")
-        .join("marketplace");
-    fs::create_dir_all(&dir)?;
-    let zip_path = dir.join("text-kit-1.0.0.zip");
-    let file = fs::File::create(&zip_path)?;
-    let mut zip = zip::ZipWriter::new(file);
-    let opts = zip::write::SimpleFileOptions::default();
-    zip.start_file("plugin.json", opts)?;
-    zip.write_all(
-        r#"{
-  "id": "dev.vvicat.text-kit",
-  "name": "文本工具",
-  "version": "1.0.0",
-  "description": "提供大小写转换和长度统计。",
-  "keywords": ["text", "case", "文本"],
-  "runtime": "node",
-  "entry": "main.js",
-  "permissions": ["clipboard"],
-  "commands": [
-    {
-      "id": "text.uppercase",
-      "title": "转为大写",
-      "keyword": "upper",
-      "input": "text"
-    }
-  ]
-}"#
-        .as_bytes(),
-    )?;
-    zip.start_file("main.js", opts)?;
-    zip.write_all(
-        r#"const input = JSON.parse(process.env.VVITOOLS_RPC_INPUT || "{}");
-const query = input.params?.query || "";
-console.log(JSON.stringify({
-  type: "list",
-  items: [
-    {
-      title: query.toUpperCase(),
-      subtitle: `${query.length} 个字符`,
-      action: { type: "copy", value: query.toUpperCase() }
-    }
-  ]
-}));
-"#
-        .as_bytes(),
-    )?;
-    zip.finish()?;
-
-    entries.push(MarketplaceEntry {
-        id: "dev.vvicat.text-kit".into(),
-        name: "文本工具".into(),
-        version: "1.0.0".into(),
-        description: "静态市场样例插件，演示 zip 安装、权限确认和 Node JSON-RPC 执行。".into(),
-        icon: String::new(),
-        runtime: "node".into(),
-        entry: "main.js".into(),
-        bundled: false,
-        download_url: zip_path.to_string_lossy().into_owned(),
-        sha256: None,
-        permissions: vec!["clipboard".into()],
-    });
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(entries)
 }
 

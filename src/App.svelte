@@ -481,6 +481,14 @@
     return `${item.text.length} 个字符`;
   }
 
+  function commandDisplayName(command: CommandMatch) {
+    return command.title || command.keyword;
+  }
+
+  function commandSubtitle(command: CommandMatch) {
+    return command.plugin_name;
+  }
+
   function formatClipboardTime(value: string) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
@@ -703,8 +711,8 @@
           >
             <span class="app-avatar">{initials(command.plugin_name)}</span>
             <span>
-              <strong>{command.title}</strong>
-              <small>{command.plugin_name} · {command.keyword}</small>
+              <strong>{commandDisplayName(command)}</strong>
+              <small>{commandSubtitle(command)}</small>
             </span>
           </button>
         {/each}
@@ -726,7 +734,7 @@
                 type="button"
               >
                 <span class="app-avatar">{initials(command.plugin_name)}</span>
-                <span>{command.keyword}</span>
+                <span>{commandDisplayName(command)}</span>
               </button>
             {/each}
             {#if recentItems.length === 0}

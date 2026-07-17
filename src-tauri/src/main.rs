@@ -84,7 +84,6 @@ fn main() {
                 let _ = window.set_focus();
                 window.show()?;
             }
-            commands::ensure_sample_plugin()?;
             Ok(())
         })
         .run(tauri::generate_context!())
