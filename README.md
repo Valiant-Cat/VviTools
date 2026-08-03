@@ -33,7 +33,7 @@ VviTools 是一个基于 Tauri v2 + Svelte 的极简插件化桌面工具箱。�
 ```text
 .
 ├── plugins/                         # 随应用分发的捆绑内置插件
-│   └── dev.vvicat.system-clipboard/
+│   └── system-clipboard/
 ├── src/                             # Svelte 前端
 │   ├── App.svelte
 │   └── style.css
@@ -146,9 +146,9 @@ CLI 默认面向第三方插件，只允许 `node` 和 `shell` runtime。`builti
 
 ## 捆绑内置插件
 
-`plugins/dev.vvicat.system-clipboard` 是真实的捆绑内置插件目录，不是普通用户插件。它通过 manifest 声明插件身份、命令、权限、图标和宿主桥接契约；实际剪贴板监听、图片/文件读取、粘贴回前台应用等高权限能力由 Rust 宿主实现。
+`plugins/system-clipboard` 是真实的捆绑内置插件目录，不是普通用户插件。它通过 manifest 声明插件身份、命令、权限、图标和宿主桥接契约；实际剪贴板监听、图片/文件读取、粘贴回前台应用等高权限能力由 Rust 宿主实现。
 
-用户界面应展示插件名 `系统剪贴板`，不要展示内部 ID `dev.vvicat.system-clipboard`。
+用户界面应展示插件名 `系统剪贴板`，不要展示内部 ID `system-clipboard`。
 
 ## 常用验证
 

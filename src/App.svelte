@@ -97,7 +97,7 @@
   type PluginCategoryKey = "efficiency" | "search" | "image" | "developer" | "system";
   type PluginCategory = "explore" | PluginCategoryKey | "custom";
 
-  const CLIPBOARD_APP_ID = "dev.vvicat.system-clipboard";
+  const CLIPBOARD_APP_ID = "system-clipboard";
   const params = new URLSearchParams(window.location.search);
   const isClipboardWindow = params.get("window") === "clipboard";
   const isFloatingWindow = params.get("window") === "floating";

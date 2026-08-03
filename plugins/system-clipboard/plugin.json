@@ -1,5 +1,5 @@
 {
-  "id": "dev.vvicat.system-clipboard",
+  "id": "system-clipboard",
   "name": "系统剪贴板",
   "version": "1.0.0",
   "description": "系统剪贴板增强，支持历史记录、搜索、图片、文件、收藏和底部快捷面板。",

@@ -7,7 +7,7 @@
 ## 目录结构
 
 ```text
-plugins/dev.vvicat.system-clipboard/
+plugins/system-clipboard/
   plugin.json
   builtin.ts
   README.md

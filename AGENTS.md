@@ -14,9 +14,9 @@ VviTools 是 Tauri v2 + Svelte + Rust 的插件化桌面工具箱。当前核心
 
 - 主窗口是搜索、插件市场、已安装插件和设置入口。
 - 剪贴板完整功能在独立剪贴板窗口，不嵌入主窗口。
-- `系统剪贴板` 是捆绑内置插件，目录在 `plugins/dev.vvicat.system-clipboard`。
+- `系统剪贴板` 是捆绑内置插件，目录在 `plugins/system-clipboard`。
 - 剪贴板高权限能力由 Rust 宿主实现，插件目录负责 manifest、图标、内置桥接契约和应用信息。
-- 用户界面展示 `系统剪贴板`，不要展示内部 ID `dev.vvicat.system-clipboard`。
+- 用户界面展示 `系统剪贴板`，不要展示内部 ID `system-clipboard`。
 
 ## 开发约束
 

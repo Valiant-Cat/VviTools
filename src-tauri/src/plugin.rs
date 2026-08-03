@@ -386,7 +386,7 @@ fn run_builtin_command(
     }
 
     match (plugin.manifest.id.as_str(), command_id) {
-        ("dev.vvicat.system-clipboard", "clipboard.open") => Ok(RpcResult::Text {
+        ("system-clipboard", "clipboard.open") => Ok(RpcResult::Text {
             text: "使用 Alt + V 打开系统剪贴板。".into(),
         }),
         _ => Err(anyhow!("未知内置插件命令: {}", command_id)),

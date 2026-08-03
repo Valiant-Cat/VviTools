@@ -25,7 +25,7 @@ export type BuiltinResult =
   | { type: "error"; message: string };
 
 export const plugin = {
-  id: "dev.vvicat.system-clipboard",
+  id: "system-clipboard",
   bridge: "host.clipboard",
   commands: {
     "clipboard.open": {
