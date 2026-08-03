@@ -21,6 +21,7 @@ mod tests {
             description: "返回输入文本".into(),
             icon: String::new(),
             keywords: vec!["echo".into(), "回显".into()],
+            categories: vec!["efficiency".into()],
             runtime,
             entry: entry.into(),
             builtin: None,
@@ -117,6 +118,7 @@ mod tests {
             bundled: false,
             download_url: zip_path.to_string_lossy().into_owned(),
             sha256: None,
+            categories: vec!["efficiency".into()],
             permissions: vec!["clipboard".into()],
         };
 

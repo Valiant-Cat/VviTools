@@ -20,6 +20,8 @@ pub enum PluginRuntime {
     Builtin,
 }
 
+pub const PLUGIN_CATEGORIES: &[&str] = &["efficiency", "search", "image", "developer", "system"];
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PluginCommand {
     pub id: String,
@@ -38,6 +40,8 @@ pub struct PluginManifest {
     pub icon: String,
     #[serde(default)]
     pub keywords: Vec<String>,
+    #[serde(default)]
+    pub categories: Vec<String>,
     pub runtime: PluginRuntime,
     pub entry: String,
     #[serde(default)]
@@ -130,6 +134,8 @@ pub struct MarketplaceEntry {
     pub bundled: bool,
     pub download_url: String,
     pub sha256: Option<String>,
+    #[serde(default)]
+    pub categories: Vec<String>,
     #[serde(default)]
     pub permissions: Vec<String>,
 }
@@ -474,6 +480,21 @@ fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
     }
     if manifest.icon.contains("..") {
         return Err(anyhow!("插件图标路径不能包含上级目录"));
+    }
+    if manifest.categories.is_empty() {
+        return Err(anyhow!(
+            "插件必须声明 categories，允许值: {}",
+            PLUGIN_CATEGORIES.join(", ")
+        ));
+    }
+    for category in &manifest.categories {
+        if !PLUGIN_CATEGORIES.contains(&category.as_str()) {
+            return Err(anyhow!(
+                "插件分类不支持: {}，允许值: {}",
+                category,
+                PLUGIN_CATEGORIES.join(", ")
+            ));
+        }
     }
     if manifest.runtime == PluginRuntime::Builtin {
         let spec = manifest

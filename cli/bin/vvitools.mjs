@@ -9,6 +9,7 @@ const VERSION = "0.1.0";
 const VALID_RUNTIMES = new Set(["node", "shell", "builtin"]);
 const USER_RUNTIMES = new Set(["node", "shell"]);
 const INPUT_TYPES = new Set(["none", "text"]);
+const PLUGIN_CATEGORIES = new Set(["efficiency", "search", "image", "developer", "system"]);
 
 main().catch((error) => {
   console.error(`错误: ${error.message}`);
@@ -61,7 +62,7 @@ function printHelp(pluginSubcommand) {
   console.log(`vvitools ${VERSION}
 
 用法:
-  vvitools plugin create <目录或插件名> [--runtime node|shell] [--name 显示名] [--id 插件ID]
+  vvitools plugin create <目录或插件名> [--runtime node|shell] [--name 显示名] [--id 插件ID] [--category 分类]
   vvitools plugin validate <插件目录> [--allow-builtin]
   vvitools plugin pack <插件目录> [--out dist/xxx.zip] [--allow-builtin]
 
@@ -69,7 +70,7 @@ function printHelp(pluginSubcommand) {
   plugin      插件开发工具，支持创建、校验和打包插件
 
 示例:
-  vvitools plugin create hello-tools --runtime node --name "Hello 工具"
+  vvitools plugin create hello-tools --runtime node --name "Hello 工具" --category efficiency
   vvitools plugin validate hello-tools
   vvitools plugin pack hello-tools`);
 }
@@ -78,7 +79,7 @@ function pluginHelp(commandName) {
   return `${commandName} ${VERSION}
 
 用法:
-  ${commandName} create <目录或插件名> [--runtime node|shell] [--name 显示名] [--id 插件ID]
+  ${commandName} create <目录或插件名> [--runtime node|shell] [--name 显示名] [--id 插件ID] [--category 分类]
   ${commandName} validate <插件目录> [--allow-builtin]
   ${commandName} pack <插件目录> [--out dist/xxx.zip] [--allow-builtin]
 
@@ -88,7 +89,7 @@ function pluginHelp(commandName) {
   pack        校验后打包为 zip，供插件市场或本地安装使用
 
 示例:
-  ${commandName} create hello-tools --runtime node --name "Hello 工具"
+  ${commandName} create hello-tools --runtime node --name "Hello 工具" --category efficiency
   ${commandName} validate hello-tools
   ${commandName} pack hello-tools`;
 }
@@ -114,6 +115,10 @@ async function createPlugin(argv) {
   }
 
   const slug = toSlug(path.basename(targetDir));
+  const category = options.category ?? "efficiency";
+  if (!PLUGIN_CATEGORIES.has(category)) {
+    throw new Error(`category 必须是以下之一: ${Array.from(PLUGIN_CATEGORIES).join(", ")}`);
+  }
   const manifest = {
     id: options.id ?? `dev.vvicat.${slug}`,
     name: options.name ?? toDisplayName(slug),
@@ -121,6 +126,7 @@ async function createPlugin(argv) {
     description: "一个 VviTools 插件。",
     icon: "assets/icon.svg",
     keywords: [slug],
+    categories: [category],
     runtime,
     entry: runtime === "node" ? "main.mjs" : "main.sh",
     permissions: [],
@@ -232,6 +238,17 @@ async function validatePlugin(pluginDir, { allowBuiltin }) {
 
   if (!Array.isArray(manifest.keywords)) {
     errors.push("keywords 必须是数组");
+  }
+  if (!Array.isArray(manifest.categories) || manifest.categories.length === 0) {
+    errors.push(`categories 必须至少包含一个分类: ${Array.from(PLUGIN_CATEGORIES).join(", ")}`);
+  } else {
+    manifest.categories.forEach((category, index) => {
+      if (typeof category !== "string" || category.trim() === "") {
+        errors.push(`categories[${index}] 不能为空`);
+      } else if (!PLUGIN_CATEGORIES.has(category)) {
+        errors.push(`categories[${index}] 不支持: ${category}`);
+      }
+    });
   }
   if (!Array.isArray(manifest.permissions)) {
     errors.push("permissions 必须是数组");

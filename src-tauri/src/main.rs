@@ -40,6 +40,7 @@ fn main() {
             commands::import_custom_plugin_config,
             commands::delete_custom_plugin,
             commands::open_external,
+            commands::check_for_update,
             commands::open_clipboard_window,
             commands::open_launcher_from_floating,
             commands::begin_floating_drag,

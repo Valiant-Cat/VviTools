@@ -39,6 +39,7 @@
     runtime: string;
     entry: string;
     bundled: boolean;
+    categories: PluginCategoryKey[];
     permissions: string[];
     commands: number;
   };
@@ -54,7 +55,16 @@
     bundled: boolean;
     download_url: string;
     sha256?: string | null;
+    categories: PluginCategoryKey[];
     permissions: string[];
+  };
+
+  type UpdateInfo = {
+    current_version: string;
+    latest_version: string;
+    has_update: boolean;
+    release_url: string;
+    message: string;
   };
 
   type RpcResult =
@@ -84,7 +94,8 @@
   type ClipboardFilter = "all" | "text" | "image" | "file" | "favorite";
 
   type View = "launcher" | "finder" | "clipboard" | "installed" | "settings";
-  type PluginCategory = "explore" | "efficiency" | "search" | "image" | "developer" | "system" | "custom";
+  type PluginCategoryKey = "efficiency" | "search" | "image" | "developer" | "system";
+  type PluginCategory = "explore" | PluginCategoryKey | "custom";
 
   const CLIPBOARD_APP_ID = "dev.vvicat.system-clipboard";
   const params = new URLSearchParams(window.location.search);
@@ -120,12 +131,16 @@
   let customImportMode: "local" | "remote" = "local";
   let customRemoteUrl = "";
   let customImportStatus = "";
+  let marketDetailOpen = false;
   let autostartEnabled = false;
   let autostartLoading = false;
   let dockVisibleEnabled = false;
   let dockVisibleLoading = false;
   let floatingWindowEnabled = false;
   let floatingWindowLoading = false;
+  let updateLoading = false;
+  let updateStatus = "";
+  let updateReleaseUrl = "";
   let searchInput: HTMLInputElement;
   let clipboardBoard: HTMLElement;
   let customFileInput: HTMLInputElement;
@@ -379,9 +394,11 @@
 
   async function activateMarketItem(item: MarketplaceEntry) {
     selectedMarketId = item.id;
-    if (!item.bundled && !installedIds.has(item.id)) {
-      await install(item);
-    }
+    marketDetailOpen = true;
+  }
+
+  function closeMarketDetail() {
+    marketDetailOpen = false;
   }
 
   async function openFeature(nextView: View = "finder") {
@@ -400,6 +417,7 @@
 
   async function openPluginCategory(category: PluginCategory) {
     selectedPluginCategory = category;
+    marketDetailOpen = false;
     await openFeature("finder");
   }
 
@@ -484,6 +502,35 @@
       await loadFloatingWindowStatus();
     } finally {
       floatingWindowLoading = false;
+    }
+  }
+
+  async function checkUpdate() {
+    if (updateLoading) return;
+    updateLoading = true;
+    updateStatus = "";
+    updateReleaseUrl = "";
+    error = "";
+    try {
+      const info = await invoke<UpdateInfo>("check_for_update");
+      updateReleaseUrl = info.release_url;
+      updateStatus = info.has_update
+        ? `发现新版本 ${info.latest_version}，当前版本 ${info.current_version}`
+        : `${info.message}，当前版本 ${info.current_version}`;
+    } catch (err) {
+      updateStatus = "";
+      error = String(err);
+    } finally {
+      updateLoading = false;
+    }
+  }
+
+  async function openUpdateRelease() {
+    if (!updateReleaseUrl) return;
+    try {
+      await invoke("open_external", { url: updateReleaseUrl });
+    } catch (err) {
+      error = String(err);
     }
   }
 
@@ -678,8 +725,14 @@
       if (item) await copyClipboardItem(item, true);
       return;
     }
+    if (view === "finder") {
+      if (marketDetail) {
+        selectedMarketId = marketDetail.id;
+        marketDetailOpen = true;
+      }
+      return;
+    }
     if (view !== "launcher") {
-      if (marketDetail && !installedIds.has(marketDetail.id)) await install(marketDetail);
       return;
     }
     const list = query ? launcherItems : recentItems;
@@ -737,7 +790,16 @@
   function matchText(item: MarketplaceEntry | PluginView, value: string) {
     const q = value.trim().toLowerCase();
     if (!q) return true;
-    return [item.id, item.name, item.description, item.version, item.runtime, item.entry, item.permissions.join(" ")]
+    return [
+      item.id,
+      item.name,
+      item.description,
+      item.version,
+      item.runtime,
+      item.entry,
+      item.categories.join(" "),
+      item.permissions.join(" "),
+    ]
       .join(" ")
       .toLowerCase()
       .includes(q);
@@ -755,6 +817,7 @@
       bundled: plugin.bundled,
       download_url: "",
       sha256: null,
+      categories: plugin.categories,
       permissions: plugin.permissions,
     };
   }
@@ -767,15 +830,12 @@
 
   function matchesPluginCategory(item: MarketplaceEntry, category: PluginCategory) {
     if (category === "explore") return true;
-    const text = [item.id, item.name, item.description, item.runtime, item.entry, item.permissions.join(" ")]
-      .join(" ")
-      .toLowerCase();
-    if (category === "system") return item.bundled || text.includes("system") || text.includes("系统");
-    if (category === "developer") return ["node", "shell"].includes(item.runtime) || text.includes("开发");
-    if (category === "image") return text.includes("image") || text.includes("图像") || text.includes("图片");
-    if (category === "search") return text.includes("search") || text.includes("搜索");
     if (category === "custom") return !item.bundled;
-    return !item.bundled && !text.includes("search") && !text.includes("image");
+    return item.categories.includes(category);
+  }
+
+  function categoryLabel(category: PluginCategoryKey) {
+    return pluginCategories.find((item) => item.key === category)?.label ?? category;
   }
 
   function categoryEmptyText() {
@@ -1115,6 +1175,19 @@
         <ArrowLeft size={16} />
         搜索
       </button>
+      <div class="feature-search">
+        <Search size={16} />
+        <input
+          bind:this={searchInput}
+          bind:value={query}
+          on:input={onInput}
+          on:keydown={handleKeydown}
+          placeholder={view === "installed" ? "搜索已安装插件" : "搜索插件"}
+        />
+        {#if query}
+          <button class="clear" on:click={() => ((query = ""), onInput())} type="button"><X size={15} /></button>
+        {/if}
+      </div>
       <nav>
         {#each pluginCategories as item}
           <button
@@ -1146,21 +1219,80 @@
     </aside>
 
     <section class="feature-container">
-      <div class="feature-search">
-        <Search size={16} />
-        <input
-          bind:this={searchInput}
-          bind:value={query}
-          on:input={onInput}
-          on:keydown={handleKeydown}
-          placeholder={view === "clipboard" ? "搜索剪贴板历史" : view === "installed" ? "搜索已安装插件" : "搜索插件"}
-        />
-        {#if query}
-          <button class="clear" on:click={() => ((query = ""), onInput())} type="button"><X size={15} /></button>
-        {/if}
-      </div>
-
       {#if view === "finder"}
+        {#if marketDetailOpen && marketDetail}
+          <article class="market-detail-page">
+            <button class="detail-back" on:click={closeMarketDetail} type="button" aria-label="返回插件列表">
+              <ArrowLeft size={26} />
+            </button>
+            <section class="market-detail-hero">
+              <span class="plugin-icon market-detail-icon">
+                {#if isClipboardEntry(marketDetail)}<ClipboardList size={34} />{:else}{initials(marketDetail.name)}{/if}
+              </span>
+              <div class="market-detail-title">
+                <h2>{marketDetail.name}</h2>
+                <p>{marketDetail.description}</p>
+                {#if isClipboardEntry(marketDetail)}
+                  <button class="primary detail-action" on:click={openClipboardPanel} type="button">打开</button>
+                {:else if installedIds.has(marketDetail.id)}
+                  <button class="primary detail-action" disabled type="button">已安装</button>
+                {:else}
+                  <button class="primary detail-action" disabled={loading} on:click={() => install(marketDetail)} type="button">
+                    {#if loading}<Loader2 class="spin" size={16} />{:else}<DownloadCloud size={17} />{/if}
+                    获取
+                  </button>
+                {/if}
+              </div>
+            </section>
+            <section class="market-detail-stats">
+              <div>
+                <strong>分类</strong>
+                <span>{marketDetail.categories.map(categoryLabel).join("、") || "未分类"}</span>
+              </div>
+              <div>
+                <strong>类型</strong>
+                <span>{marketDetail.bundled ? "内置插件" : "第三方插件"}</span>
+              </div>
+              <div>
+                <strong>运行时</strong>
+                <span>{marketDetail.runtime || "plugin"}</span>
+              </div>
+              <div>
+                <strong>版本</strong>
+                <span>{marketDetail.version}</span>
+              </div>
+            </section>
+            <nav class="market-detail-tabs" aria-label="插件详情">
+              <button class="active" type="button">介绍</button>
+              <button type="button">权限</button>
+              <button type="button">更新记录</button>
+            </nav>
+            <section class="market-detail-previews" aria-label="插件预览">
+              <div class="plugin-preview-card primary-preview">
+                <span>{marketDetail.name}</span>
+                <strong>{marketDetail.categories.map(categoryLabel).join(" / ") || "VviTools 插件"}</strong>
+                <small>{marketDetail.description}</small>
+              </div>
+              <div class="plugin-preview-card secondary-preview">
+                <span>Runtime</span>
+                <strong>{marketDetail.runtime || "plugin"}</strong>
+                <small>{marketDetail.entry || "无需入口"}</small>
+              </div>
+            </section>
+            <section class="market-detail-content">
+              <h3>{marketDetail.name}</h3>
+              <p>{marketDetail.description}</p>
+              <h3>插件信息</h3>
+              <p>入口：{marketDetail.entry || "无"}</p>
+              <p>权限：{marketDetail.permissions.join("、") || "无"}</p>
+              <div class="feature-tags">
+                {#each marketDetail.categories as category}
+                  <button type="button">{categoryLabel(category)}</button>
+                {/each}
+              </div>
+            </section>
+          </article>
+        {:else}
         <div class="market-page">
           <div class="market-head">
             <div>
@@ -1208,6 +1340,7 @@
             {/if}
           </div>
         </div>
+        {/if}
       {:else if view === "installed"}
         <div class="view-title">已安装</div>
         <div class="installed-layout">
@@ -1331,6 +1464,21 @@
                 <small>使用 Alt + Space 显示或隐藏搜索，Alt + V 从底部打开剪贴板。</small>
               </span>
               <em>Alt Space / Alt V</em>
+            </div>
+            <div class="settings-row">
+              <span>
+                <strong>检查更新</strong>
+                <small>{updateStatus || "检查 GitHub Releases 中是否有新版本。"}</small>
+              </span>
+              <div class="settings-actions">
+                {#if updateReleaseUrl}
+                  <button class="secondary" on:click={openUpdateRelease} type="button">发布页</button>
+                {/if}
+                <button class="secondary" disabled={updateLoading} on:click={checkUpdate} type="button">
+                  {#if updateLoading}<Loader2 class="spin" size={14} />{/if}
+                  检查
+                </button>
+              </div>
             </div>
             <div class="settings-row">
               <span>
