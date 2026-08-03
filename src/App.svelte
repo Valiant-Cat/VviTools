@@ -89,6 +89,7 @@
   const CLIPBOARD_APP_ID = "dev.vvicat.system-clipboard";
   const params = new URLSearchParams(window.location.search);
   const isClipboardWindow = params.get("window") === "clipboard";
+  const isFloatingWindow = params.get("window") === "floating";
   const pluginCategories: Array<{ key: PluginCategory; label: string }> = [
     { key: "explore", label: "探索" },
     { key: "efficiency", label: "效率" },
@@ -123,12 +124,23 @@
   let autostartLoading = false;
   let dockVisibleEnabled = false;
   let dockVisibleLoading = false;
+  let floatingWindowEnabled = false;
+  let floatingWindowLoading = false;
   let searchInput: HTMLInputElement;
   let clipboardBoard: HTMLElement;
   let customFileInput: HTMLInputElement;
   let unlistenShowLauncher: (() => void) | undefined;
   let unlistenOpenSettings: (() => void) | undefined;
   let unlistenOpenClipboard: (() => void) | undefined;
+  let floatingPointerStart:
+    | {
+        screenX: number;
+        screenY: number;
+        pointerId: number;
+      }
+    | null = null;
+  let floatingDragging = false;
+  let floatingMoved = false;
 
   $: installedIds = new Set(plugins.map((plugin) => plugin.id));
   $: customMarket = plugins.filter((plugin) => !plugin.bundled).map(pluginViewToMarketEntry);
@@ -183,6 +195,14 @@
   async function loadDockVisibleStatus() {
     try {
       dockVisibleEnabled = await invoke<boolean>("is_dock_visible_enabled");
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
+  async function loadFloatingWindowStatus() {
+    try {
+      floatingWindowEnabled = await invoke<boolean>("is_floating_window_enabled");
     } catch (err) {
       error = String(err);
     }
@@ -413,6 +433,7 @@
     clipboardStatus = "";
     await loadAutostartStatus();
     await loadDockVisibleStatus();
+    await loadFloatingWindowStatus();
     await tick();
     resetViewport();
     searchInput?.focus();
@@ -447,6 +468,22 @@
       await loadDockVisibleStatus();
     } finally {
       dockVisibleLoading = false;
+    }
+  }
+
+  async function toggleFloatingWindow() {
+    if (floatingWindowLoading) return;
+    floatingWindowLoading = true;
+    error = "";
+    try {
+      floatingWindowEnabled = await invoke<boolean>("set_floating_window_enabled", {
+        request: { enabled: !floatingWindowEnabled },
+      });
+    } catch (err) {
+      error = String(err);
+      await loadFloatingWindowStatus();
+    } finally {
+      floatingWindowLoading = false;
     }
   }
 
@@ -546,10 +583,93 @@
 
   async function hideCurrentWindow() {
     try {
-      await invoke("hide_window", { label: isClipboardWindow ? "clipboard" : "main" });
+      await invoke("hide_window", { label: isClipboardWindow ? "clipboard" : isFloatingWindow ? "floating" : "main" });
     } catch {
       // 浏览器预览环境没有 Tauri 窗口。
     }
+  }
+
+  async function openLauncherFromFloating() {
+    try {
+      await invoke("open_launcher_from_floating");
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
+  async function beginFloatingPointer(event: PointerEvent) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    if (event.currentTarget instanceof HTMLElement) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    floatingPointerStart = {
+      screenX: event.screenX,
+      screenY: event.screenY,
+      pointerId: event.pointerId,
+    };
+    floatingDragging = false;
+    floatingMoved = false;
+    try {
+      await invoke("begin_floating_drag", { request: { screen_x: event.screenX, screen_y: event.screenY } });
+    } catch {
+      floatingPointerStart = null;
+    }
+  }
+
+  async function moveFloatingPointer(event: PointerEvent) {
+    if (!floatingPointerStart || floatingDragging) return;
+    event.preventDefault();
+    const dx = event.screenX - floatingPointerStart.screenX;
+    const dy = event.screenY - floatingPointerStart.screenY;
+    if (!floatingMoved && Math.hypot(dx, dy) < 4) return;
+    floatingDragging = true;
+    try {
+      floatingMoved =
+        (await invoke<boolean>("move_floating_drag", {
+          request: { screen_x: event.screenX, screen_y: event.screenY },
+        })) || floatingMoved;
+    } catch {
+      // 浏览器预览环境没有 Tauri 窗口。
+    } finally {
+      floatingDragging = false;
+    }
+  }
+
+  async function endFloatingPointer(event: PointerEvent) {
+    const shouldOpen = floatingPointerStart && !floatingDragging && !floatingMoved;
+    if (event.currentTarget instanceof HTMLElement) {
+      try {
+        event.currentTarget.releasePointerCapture(floatingPointerStart?.pointerId ?? event.pointerId);
+      } catch {
+        // 指针捕获可能已被系统释放。
+      }
+    }
+    floatingPointerStart = null;
+    floatingDragging = false;
+    floatingMoved = false;
+    try {
+      await invoke("end_floating_drag");
+    } catch {
+      // 浏览器预览环境没有 Tauri 窗口。
+    }
+    if (shouldOpen) await openLauncherFromFloating();
+  }
+
+  function cancelFloatingPointer(event?: PointerEvent) {
+    if (event?.currentTarget instanceof HTMLElement && floatingPointerStart) {
+      try {
+        event.currentTarget.releasePointerCapture(floatingPointerStart.pointerId);
+      } catch {
+        // 指针捕获可能已被系统释放。
+      }
+    }
+    floatingPointerStart = null;
+    floatingDragging = false;
+    floatingMoved = false;
+    void invoke("end_floating_drag").catch(() => {
+      // 浏览器预览环境没有 Tauri 窗口。
+    });
   }
 
   async function activateSelected() {
@@ -735,33 +855,36 @@
     return selectedCategoryLabel;
   }
 
-  refreshAll();
-  tick().then(() => searchInput?.focus());
-  window.addEventListener("vvitools-show-launcher", handleShowLauncher);
-  window.addEventListener("vvitools-open-settings", handleOpenSettings);
-  window.addEventListener("vvitools-open-clipboard", handleOpenClipboard);
-  listen("show-launcher", handleShowLauncher)
-    .then((unlisten) => {
-      unlistenShowLauncher = unlisten;
-    })
-    .catch(() => {
-      // 浏览器预览环境没有 Tauri 事件总线。
-    });
-  listen("open-settings", handleOpenSettings)
-    .then((unlisten) => {
-      unlistenOpenSettings = unlisten;
-    })
-    .catch(() => {
-      // 浏览器预览环境没有 Tauri 事件总线。
-    });
-  listen("open-clipboard", handleOpenClipboard)
-    .then((unlisten) => {
-      unlistenOpenClipboard = unlisten;
-    })
-    .catch(() => {
-      // 浏览器预览环境没有 Tauri 事件总线。
-    });
+  if (!isFloatingWindow) {
+    refreshAll();
+    tick().then(() => searchInput?.focus());
+    window.addEventListener("vvitools-show-launcher", handleShowLauncher);
+    window.addEventListener("vvitools-open-settings", handleOpenSettings);
+    window.addEventListener("vvitools-open-clipboard", handleOpenClipboard);
+    listen("show-launcher", handleShowLauncher)
+      .then((unlisten) => {
+        unlistenShowLauncher = unlisten;
+      })
+      .catch(() => {
+        // 浏览器预览环境没有 Tauri 事件总线。
+      });
+    listen("open-settings", handleOpenSettings)
+      .then((unlisten) => {
+        unlistenOpenSettings = unlisten;
+      })
+      .catch(() => {
+        // 浏览器预览环境没有 Tauri 事件总线。
+      });
+    listen("open-clipboard", handleOpenClipboard)
+      .then((unlisten) => {
+        unlistenOpenClipboard = unlisten;
+      })
+      .catch(() => {
+        // 浏览器预览环境没有 Tauri 事件总线。
+      });
+  }
   onDestroy(() => {
+    if (isFloatingWindow) return;
     window.removeEventListener("vvitools-show-launcher", handleShowLauncher);
     window.removeEventListener("vvitools-open-settings", handleOpenSettings);
     window.removeEventListener("vvitools-open-clipboard", handleOpenClipboard);
@@ -771,7 +894,22 @@
   });
 </script>
 
-{#if isClipboardWindow}
+{#if isFloatingWindow}
+  <main class="floating-window" data-tauri-drag-region>
+    <div
+      class="floating-trigger"
+      role="button"
+      tabindex="0"
+      aria-label="打开 VviTools"
+      on:pointercancel={cancelFloatingPointer}
+      on:pointerdown={beginFloatingPointer}
+      on:pointermove={moveFloatingPointer}
+      on:pointerup={endFloatingPointer}
+    >
+      <span class="floating-mark">V</span>
+    </div>
+  </main>
+{:else if isClipboardWindow}
   <main class="rubick-window clipboard-window" data-tauri-drag-region>
     <header class="copycat-topbar">
       <strong>剪贴板</strong>
@@ -1162,6 +1300,27 @@
                   <Loader2 class="spin" size={14} />
                 {:else}
                   <span class="sr-only">{dockVisibleEnabled ? "已开启" : "已关闭"}</span>
+                  <span class="settings-switch-thumb"></span>
+                {/if}
+              </button>
+            </div>
+            <div class="settings-row">
+              <span>
+                <strong>桌面悬浮窗</strong>
+                <small>开启后显示可拖动的桌面入口；关闭后不显示悬浮入口。</small>
+              </span>
+              <button
+                class="settings-switch"
+                class:enabled={floatingWindowEnabled}
+                disabled={floatingWindowLoading}
+                aria-pressed={floatingWindowEnabled}
+                on:click={toggleFloatingWindow}
+                type="button"
+              >
+                {#if floatingWindowLoading}
+                  <Loader2 class="spin" size={14} />
+                {:else}
+                  <span class="sr-only">{floatingWindowEnabled ? "已开启" : "已关闭"}</span>
                   <span class="settings-switch-thumb"></span>
                 {/if}
               </button>
