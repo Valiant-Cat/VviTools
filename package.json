@@ -3,10 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "cli"
+  ],
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "plugin": "node cli/bin/vvitools.mjs plugin",
     "tauri": "tauri",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml"
   },

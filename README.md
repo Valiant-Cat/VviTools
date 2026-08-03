@@ -99,6 +99,42 @@ src-tauri/target/release/bundle/macos/VviTools.app
 }
 ```
 
+## 插件 CLI
+
+仓库根目录的 `cli/` 提供独立 CLI 模块 `vvitools-cli`，安装后暴露 `vvitools` 命令。当前插件子命令用于对齐 rubick `rubick-plugin-cli create` 的开发体验，但生成的是 VviTools 当前协议的 `plugin.json` 插件。
+
+本地使用：
+
+```bash
+npm run plugin -- --help
+```
+
+等价于调用：
+
+```bash
+vvitools plugin --help
+```
+
+创建插件模板：
+
+```bash
+npm run plugin -- create hello-tools --runtime node --name "Hello 工具"
+```
+
+校验插件：
+
+```bash
+npm run plugin -- validate hello-tools
+```
+
+打包插件：
+
+```bash
+npm run plugin -- pack hello-tools
+```
+
+CLI 默认面向第三方插件，只允许 `node` 和 `shell` runtime。`builtin` 仅用于 `plugins/` 下随应用分发的捆绑内置插件，内部校验时需要显式传入 `--allow-builtin`。
+
 插件执行时通过 stdin 接收 JSON RPC 风格输入，stdout 输出 `RpcResult`：
 
 ```json

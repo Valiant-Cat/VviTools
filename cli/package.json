@@ -1,0 +1,17 @@
+{
+  "name": "vvitools-cli",
+  "version": "0.1.0",
+  "description": "VviTools 命令行工具",
+  "type": "module",
+  "bin": {
+    "vvitools": "bin/vvitools.mjs"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

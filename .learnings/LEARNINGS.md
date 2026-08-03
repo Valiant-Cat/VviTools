@@ -4,6 +4,29 @@
 
 ---
 
+## [LRN-20260803-001] plugin-cli-module-boundary
+
+**Logged**: 2026-08-03T03:03:00Z
+**Priority**: medium
+**Status**: pending
+**Area**: config
+
+### Summary
+VviTools 命令行工具应作为独立 workspace 模块维护，而不是直接挂在私有桌面应用根包的 `bin` 字段上。
+
+### Details
+用户纠正了首版实现：CLI 面向开发者，后续应具备独立发布、独立安装和独立演进能力；主应用根包是 `private` 桌面 app，只应通过 `npm run plugin` 提供仓库内便捷入口。当前项目采用根目录 `cli/` 放置命令行模块，包名可用 `vvitools-cli`，对外命令只使用更简洁的 `vvitools`，不保留 `vvitools-plugin-cli` 兼容别名。
+
+### Suggested Action
+后续维护 VviTools 命令行能力时优先放在根目录 `cli/` 模块中，根包只保留 workspace 声明和便捷脚本；不要再引入 `vvitools-plugin-cli` 这类兼容别名。
+
+### Metadata
+- Source: user_feedback
+- Related Files: package.json, cli/package.json
+- Tags: cli, workspace, plugin-system
+
+---
+
 ## [LRN-20260716-001] plugin-architecture
 
 **Logged**: 2026-07-16T11:21:00Z
