@@ -91,9 +91,23 @@
     file_paths?: string[];
   };
 
+  type AccessibilityPermissionStatus = {
+    granted: boolean;
+    supported: boolean;
+    app_path: string;
+    message: string;
+  };
+
+  type ClipboardPasteResult = {
+    copied: boolean;
+    paste_requested: boolean;
+    needs_accessibility_permission: boolean;
+    message: string;
+  };
+
   type ClipboardFilter = "all" | "text" | "image" | "file" | "favorite";
 
-  type View = "launcher" | "finder" | "clipboard" | "installed" | "settings";
+  type View = "launcher" | "finder" | "clipboard" | "installed" | "settings" | "permission";
   type PluginCategoryKey = "efficiency" | "search" | "image" | "developer" | "system";
   type PluginCategory = "explore" | PluginCategoryKey | "custom";
 
@@ -138,6 +152,12 @@
   let dockVisibleLoading = false;
   let floatingWindowEnabled = false;
   let floatingWindowLoading = false;
+  let accessibilityPermissionGranted = false;
+  let accessibilityPermissionSupported = false;
+  let accessibilityPermissionLoading = false;
+  let accessibilityPermissionMessage = "";
+  let accessibilityAppPath = "";
+  let showAccessibilityDialog = false;
   let updateLoading = false;
   let updateStatus = "";
   let updateReleaseUrl = "";
@@ -147,6 +167,7 @@
   let unlistenShowLauncher: (() => void) | undefined;
   let unlistenOpenSettings: (() => void) | undefined;
   let unlistenOpenClipboard: (() => void) | undefined;
+  let unlistenOpenAccessibilityPermission: (() => void) | undefined;
   let floatingPointerStart:
     | {
         screenX: number;
@@ -218,6 +239,18 @@
   async function loadFloatingWindowStatus() {
     try {
       floatingWindowEnabled = await invoke<boolean>("is_floating_window_enabled");
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
+  async function loadAccessibilityPermissionStatus() {
+    try {
+      const status = await invoke<AccessibilityPermissionStatus>("accessibility_permission_status");
+      accessibilityPermissionGranted = status.granted;
+      accessibilityPermissionSupported = status.supported;
+      accessibilityPermissionMessage = status.message;
+      accessibilityAppPath = status.app_path;
     } catch (err) {
       error = String(err);
     }
@@ -452,6 +485,7 @@
     await loadAutostartStatus();
     await loadDockVisibleStatus();
     await loadFloatingWindowStatus();
+    await loadAccessibilityPermissionStatus();
     await tick();
     resetViewport();
     searchInput?.focus();
@@ -505,6 +539,59 @@
     }
   }
 
+  async function requestAccessibilityPermission() {
+    if (accessibilityPermissionLoading) return;
+    accessibilityPermissionLoading = true;
+    error = "";
+    try {
+      const status = await invoke<AccessibilityPermissionStatus>("request_accessibility_permission");
+      accessibilityPermissionGranted = status.granted;
+      accessibilityPermissionSupported = status.supported;
+      accessibilityPermissionMessage = status.message;
+      accessibilityAppPath = status.app_path;
+    } catch (err) {
+      error = String(err);
+    } finally {
+      accessibilityPermissionLoading = false;
+    }
+  }
+
+  async function openAccessibilityDialog() {
+    if (isClipboardWindow) {
+      await invoke("open_accessibility_permission_window").catch((err) => {
+        error = String(err);
+      });
+      return;
+    }
+    showAccessibilityDialog = true;
+  }
+
+  async function closeAccessibilityDialog() {
+    showAccessibilityDialog = false;
+    if (view === "permission") {
+      view = "launcher";
+      await hideLauncher();
+    }
+  }
+
+  async function openAccessibilitySettings() {
+    error = "";
+    try {
+      await invoke("open_accessibility_settings");
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
+  async function revealCurrentAppInFinder() {
+    error = "";
+    try {
+      await invoke("reveal_current_app_in_finder");
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
   async function checkUpdate() {
     if (updateLoading) return;
     updateLoading = true;
@@ -546,9 +633,22 @@
     error = "";
     clipboardStatus = "";
     try {
-      await invoke(closeAfterCopy ? "paste_clipboard_item" : "copy_clipboard_item", { request: { id: item.id } });
-      clipboardStatus = "已复制";
-      if (!closeAfterCopy) await loadClipboardHistory();
+      if (closeAfterCopy) {
+        const pasteResult = await invoke<ClipboardPasteResult>("paste_clipboard_item", { request: { id: item.id } });
+        if (pasteResult.needs_accessibility_permission) {
+          clipboardStatus = "已复制，开启权限后可自动粘贴";
+          accessibilityPermissionGranted = false;
+          accessibilityPermissionSupported = true;
+          accessibilityPermissionMessage = pasteResult.message;
+          await openAccessibilityDialog();
+        } else {
+          clipboardStatus = pasteResult.message || (pasteResult.paste_requested ? "已复制并自动粘贴" : "已复制");
+        }
+      } else {
+        await invoke("copy_clipboard_item", { request: { id: item.id } });
+        clipboardStatus = "已复制";
+        await loadClipboardHistory();
+      }
     } catch (err) {
       error = String(err);
     }
@@ -612,6 +712,16 @@
 
   function handleOpenClipboard() {
     void openClipboardPanel();
+  }
+
+  async function handleOpenAccessibilityPermission() {
+    view = "permission";
+    query = "";
+    result = null;
+    resultPluginId = "";
+    error = "";
+    await loadAccessibilityPermissionStatus();
+    showAccessibilityDialog = true;
   }
 
   function resetViewport() {
@@ -921,6 +1031,7 @@
     window.addEventListener("vvitools-show-launcher", handleShowLauncher);
     window.addEventListener("vvitools-open-settings", handleOpenSettings);
     window.addEventListener("vvitools-open-clipboard", handleOpenClipboard);
+    window.addEventListener("vvitools-open-accessibility-permission", handleOpenAccessibilityPermission);
     listen("show-launcher", handleShowLauncher)
       .then((unlisten) => {
         unlistenShowLauncher = unlisten;
@@ -942,15 +1053,24 @@
       .catch(() => {
         // 浏览器预览环境没有 Tauri 事件总线。
       });
+    listen("open-accessibility-permission", handleOpenAccessibilityPermission)
+      .then((unlisten) => {
+        unlistenOpenAccessibilityPermission = unlisten;
+      })
+      .catch(() => {
+        // 浏览器预览环境没有 Tauri 事件总线。
+      });
   }
   onDestroy(() => {
     if (isFloatingWindow) return;
     window.removeEventListener("vvitools-show-launcher", handleShowLauncher);
     window.removeEventListener("vvitools-open-settings", handleOpenSettings);
     window.removeEventListener("vvitools-open-clipboard", handleOpenClipboard);
+    window.removeEventListener("vvitools-open-accessibility-permission", handleOpenAccessibilityPermission);
     unlistenShowLauncher?.();
     unlistenOpenSettings?.();
     unlistenOpenClipboard?.();
+    unlistenOpenAccessibilityPermission?.();
   });
 </script>
 
@@ -1013,65 +1133,109 @@
     <section class="copycat-board" bind:this={clipboardBoard}>
       {#if error}
         <div class="launcher-status error"><Terminal size={18} />{error}</div>
-      {:else if filteredClipboardItems.length}
-        {#each filteredClipboardItems as item, index}
-          <article
-            class:image-card={item.kind === "image"}
-            class:file-card={item.kind === "file"}
-            class:selected={selectedIndex === index}
-            class="copycat-card text-card"
-            data-selected={selectedIndex === index}
-          >
-            <button
-              class="copycat-card-main"
-              on:click={() => copyClipboardItem(item, true)}
-              on:mouseenter={() => (selectedIndex = index)}
-              type="button"
-            >
-              <span class="copycat-card-head">
-                <span class="copycat-card-type">{clipboardItemLabel(item)}</span>
-                <small>{formatClipboardTime(item.copied_at)}</small>
-              </span>
-              {#if item.kind === "image"}
-                <div class="copycat-image-preview">
-                  <img src={clipboardImageSrc(item)} alt={item.preview || "剪贴板图片"} />
-                </div>
-              {:else if item.kind === "file"}
-                <p class="copycat-file-name">{item.preview || item.text}</p>
-              {:else}
-                <p>{item.preview || item.text}</p>
-              {/if}
-            </button>
-            <footer>
-              <span>
-                {clipboardItemMeta(item)}
-              </span>
-              <div>
-                <button
-                  class:active={item.favorite}
-                  aria-label={item.favorite ? "取消收藏" : "收藏"}
-                  on:click={() => toggleClipboardFavorite(item)}
-                  type="button"
-                >
-                  <Heart size={15} fill={item.favorite ? "currentColor" : "none"} />
-                </button>
-                <button aria-label="复制" on:click={() => copyClipboardItem(item, true)} type="button">
-                  <Copy size={16} />
-                </button>
-                <button aria-label="删除" on:click={() => deleteClipboardItem(item)} type="button">
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            </footer>
-          </article>
-        {/each}
       {:else}
-        <div class="copycat-empty">
-          <ClipboardList size={46} />
-          <strong>{clipboardEmptyText()}</strong>
-        </div>
+        {#if clipboardStatus}
+          <div
+            class:warning={showAccessibilityDialog || (!accessibilityPermissionGranted && accessibilityPermissionSupported)}
+            class="launcher-status compact"
+          >
+            <Terminal size={18} />{clipboardStatus}
+            {#if !accessibilityPermissionGranted && accessibilityPermissionSupported}
+              <button class="inline-link" on:click={() => openAccessibilityDialog()} type="button">查看授权</button>
+            {/if}
+          </div>
+        {/if}
+        {#if filteredClipboardItems.length}
+          {#each filteredClipboardItems as item, index}
+            <article
+              class:image-card={item.kind === "image"}
+              class:file-card={item.kind === "file"}
+              class:selected={selectedIndex === index}
+              class="copycat-card text-card"
+              data-selected={selectedIndex === index}
+            >
+              <button
+                class="copycat-card-main"
+                on:click={() => copyClipboardItem(item, true)}
+                on:mouseenter={() => (selectedIndex = index)}
+                type="button"
+              >
+                <span class="copycat-card-head">
+                  <span class="copycat-card-type">{clipboardItemLabel(item)}</span>
+                  <small>{formatClipboardTime(item.copied_at)}</small>
+                </span>
+                {#if item.kind === "image"}
+                  <div class="copycat-image-preview">
+                    <img src={clipboardImageSrc(item)} alt={item.preview || "剪贴板图片"} />
+                  </div>
+                {:else if item.kind === "file"}
+                  <p class="copycat-file-name">{item.preview || item.text}</p>
+                {:else}
+                  <p>{item.preview || item.text}</p>
+                {/if}
+              </button>
+              <footer>
+                <span>
+                  {clipboardItemMeta(item)}
+                </span>
+                <div>
+                  <button
+                    class:active={item.favorite}
+                    aria-label={item.favorite ? "取消收藏" : "收藏"}
+                    on:click={() => toggleClipboardFavorite(item)}
+                    type="button"
+                  >
+                    <Heart size={15} fill={item.favorite ? "currentColor" : "none"} />
+                  </button>
+                  <button aria-label="复制" on:click={() => copyClipboardItem(item, true)} type="button">
+                    <Copy size={16} />
+                  </button>
+                  <button aria-label="删除" on:click={() => deleteClipboardItem(item)} type="button">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </footer>
+            </article>
+          {/each}
+        {:else}
+          <div class="copycat-empty">
+            <ClipboardList size={46} />
+            <strong>{clipboardEmptyText()}</strong>
+          </div>
+        {/if}
       {/if}
     </section>
+  </main>
+{:else if view === "permission"}
+  <main class="rubick-window permission-window" data-tauri-drag-region>
+    <article class="permission-dialog standalone">
+      <header>
+        <h2>开启自动粘贴权限</h2>
+        <button aria-label="关闭" on:click={() => closeAccessibilityDialog()} type="button"><X size={24} /></button>
+      </header>
+      <div class="permission-body">
+        <p>VviTools 需要 macOS 辅助功能权限，才能在选择剪贴板记录后切回原输入框并自动粘贴。</p>
+        <div class="permission-steps">
+          <span>1. 打开系统设置里的辅助功能权限。</span>
+          <span>2. 如果列表里已有 VviTools 但仍提示，请先移除旧记录。</span>
+          <span>3. 点击“定位应用”，把当前这个 VviTools.app 添加并开启。</span>
+        </div>
+        {#if accessibilityAppPath}
+          <div class="permission-path">
+            <strong>当前应用</strong>
+            <code>{accessibilityAppPath}</code>
+          </div>
+        {/if}
+        {#if accessibilityPermissionMessage}
+          <small>{accessibilityPermissionMessage}</small>
+        {/if}
+      </div>
+      <footer>
+        <button class="secondary" on:click={openAccessibilitySettings} type="button">打开系统设置</button>
+        <button class="secondary" on:click={revealCurrentAppInFinder} type="button">定位应用</button>
+        <button class="import-button" on:click={() => closeAccessibilityDialog()} type="button">知道了</button>
+      </footer>
+    </article>
   </main>
 {:else if view === "launcher"}
   <main class="rubick-window search-window" data-tauri-drag-region>
@@ -1460,6 +1624,29 @@
             </div>
             <div class="settings-row">
               <span>
+                <strong>自动粘贴权限</strong>
+                <small>用于选择剪贴板记录后自动粘贴到原输入框。</small>
+              </span>
+              <div class="settings-actions">
+                <em class:enabled={accessibilityPermissionGranted}>
+                  {accessibilityPermissionGranted ? "已开启" : accessibilityPermissionSupported ? "未开启" : "无需授权"}
+                </em>
+                {#if !accessibilityPermissionGranted && accessibilityPermissionSupported}
+                  <button class="secondary" on:click={() => openAccessibilityDialog()} type="button">查看授权</button>
+                  <button
+                    class="secondary"
+                    disabled={accessibilityPermissionLoading}
+                    on:click={requestAccessibilityPermission}
+                    type="button"
+                  >
+                    {#if accessibilityPermissionLoading}<Loader2 class="spin" size={14} />{/if}
+                    授权
+                  </button>
+                {/if}
+              </div>
+            </div>
+            <div class="settings-row">
+              <span>
                 <strong>全局快捷键</strong>
                 <small>使用 Alt + Space 显示或隐藏搜索，Alt + V 从底部打开剪贴板。</small>
               </span>
@@ -1540,4 +1727,37 @@
       </section>
     {/if}
   </main>
+{/if}
+
+{#if showAccessibilityDialog && view !== "permission"}
+  <section class="modal-backdrop">
+    <article class="permission-dialog">
+      <header>
+        <h2>开启自动粘贴权限</h2>
+        <button aria-label="关闭" on:click={() => closeAccessibilityDialog()} type="button"><X size={24} /></button>
+      </header>
+      <div class="permission-body">
+        <p>VviTools 需要 macOS 辅助功能权限，才能在选择剪贴板记录后切回原输入框并自动粘贴。</p>
+        <div class="permission-steps">
+          <span>1. 打开系统设置里的辅助功能权限。</span>
+          <span>2. 如果列表里已有 VviTools 但仍提示，请先移除旧记录。</span>
+          <span>3. 点击“定位应用”，把当前这个 VviTools.app 添加并开启。</span>
+        </div>
+        {#if accessibilityAppPath}
+          <div class="permission-path">
+            <strong>当前应用</strong>
+            <code>{accessibilityAppPath}</code>
+          </div>
+        {/if}
+        {#if accessibilityPermissionMessage}
+          <small>{accessibilityPermissionMessage}</small>
+        {/if}
+      </div>
+      <footer>
+        <button class="secondary" on:click={openAccessibilitySettings} type="button">打开系统设置</button>
+        <button class="secondary" on:click={revealCurrentAppInFinder} type="button">定位应用</button>
+        <button class="import-button" on:click={() => closeAccessibilityDialog()} type="button">知道了</button>
+      </footer>
+    </article>
+  </section>
 {/if}

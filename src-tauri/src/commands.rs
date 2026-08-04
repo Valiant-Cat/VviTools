@@ -3,7 +3,10 @@ use std::{
     fs,
     path::PathBuf,
     process::Command,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex, OnceLock,
+    },
     thread,
     time::Duration,
 };
@@ -23,6 +26,14 @@ use vvitools_core::plugin::{
     install_plugin_from_zip, install_plugin_manifest, load_available_plugins_from, load_plugins,
     run_plugin_command, search_commands, CommandInput, CommandMatch, InstalledPlugin,
     MarketplaceEntry, PermissionDecision, PluginManifest, PluginRuntime, RpcAction, RpcResult,
+};
+
+#[cfg(target_os = "macos")]
+use core_foundation::{
+    base::TCFType,
+    boolean::CFBoolean,
+    dictionary::{CFDictionary, CFDictionaryRef},
+    string::CFString,
 };
 
 #[derive(Debug, Serialize)]
@@ -178,12 +189,29 @@ pub struct ClipboardCopyRequest {
     pub id: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct AccessibilityPermissionStatus {
+    pub granted: bool,
+    pub supported: bool,
+    pub app_path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ClipboardPasteResult {
+    pub copied: bool,
+    pub paste_requested: bool,
+    pub needs_accessibility_permission: bool,
+    pub message: String,
+}
+
 const CLIPBOARD_HISTORY_LIMIT: usize = 200;
 const CLIPBOARD_PREVIEW_LIMIT: usize = 160;
 const APP_BUNDLE_ID: &str = "dev.vvicat.vvitools";
 
 static PREVIOUS_FRONTMOST_APP: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static FLOATING_DRAG_STATE: OnceLock<Mutex<Option<FloatingDragState>>> = OnceLock::new();
+static ACCESSIBILITY_PROMPT_SHOWN: OnceLock<AtomicBool> = OnceLock::new();
 
 #[tauri::command]
 pub fn list_plugins(app: tauri::AppHandle) -> Result<Vec<PluginView>, String> {
@@ -314,13 +342,31 @@ pub fn copy_clipboard_item(request: ClipboardCopyRequest) -> Result<(), String> 
 pub fn paste_clipboard_item(
     app: tauri::AppHandle,
     request: ClipboardCopyRequest,
-) -> Result<(), String> {
+) -> Result<ClipboardPasteResult, String> {
     copy_clipboard_item_by_id(&request.id)?;
+    if !is_accessibility_trusted(false) {
+        let status = request_accessibility_permission_for_paste();
+        return Ok(ClipboardPasteResult {
+            copied: true,
+            paste_requested: false,
+            needs_accessibility_permission: !status.granted,
+            message: if status.granted {
+                "已复制，请再次选择记录以自动粘贴".into()
+            } else {
+                status.message
+            },
+        });
+    }
     if let Some(window) = app.get_webview_window("clipboard") {
         let _ = window.hide();
     }
-    paste_to_previous_frontmost_app();
-    Ok(())
+    paste_to_previous_frontmost_app()?;
+    Ok(ClipboardPasteResult {
+        copied: true,
+        paste_requested: true,
+        needs_accessibility_permission: false,
+        message: "已复制并自动粘贴".into(),
+    })
 }
 
 fn copy_clipboard_item_by_id(id: &str) -> Result<(), String> {
@@ -365,6 +411,130 @@ pub fn remember_frontmost_app() {
     }
 }
 
+#[tauri::command]
+pub fn accessibility_permission_status() -> Result<AccessibilityPermissionStatus, String> {
+    Ok(accessibility_status(false))
+}
+
+#[tauri::command]
+pub fn request_accessibility_permission() -> Result<AccessibilityPermissionStatus, String> {
+    Ok(accessibility_status(true))
+}
+
+fn request_accessibility_permission_for_paste() -> AccessibilityPermissionStatus {
+    let prompt_shown = accessibility_prompt_shown();
+    if prompt_shown.swap(true, Ordering::SeqCst) {
+        return accessibility_status(false);
+    }
+    accessibility_status(true)
+}
+
+fn accessibility_prompt_shown() -> &'static AtomicBool {
+    ACCESSIBILITY_PROMPT_SHOWN.get_or_init(|| AtomicBool::new(false))
+}
+
+fn accessibility_status(prompt: bool) -> AccessibilityPermissionStatus {
+    #[cfg(target_os = "macos")]
+    {
+        let granted = is_accessibility_trusted(prompt);
+        AccessibilityPermissionStatus {
+            granted,
+            supported: true,
+            app_path: current_app_bundle_path()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            message: if granted {
+                "自动粘贴权限已开启".into()
+            } else {
+                accessibility_permission_message(prompt)
+            },
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        AccessibilityPermissionStatus {
+            granted: true,
+            supported: false,
+            app_path: current_app_bundle_path()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            message: "当前系统不需要辅助功能授权".into(),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn open_accessibility_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .status()
+            .map_err(to_message)?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn reveal_current_app_in_finder() -> Result<(), String> {
+    let app_path = current_app_bundle_path()
+        .or_else(|| std::env::current_exe().ok())
+        .ok_or_else(|| "无法识别当前应用路径".to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("open")
+            .arg("-R")
+            .arg(&app_path)
+            .status()
+            .map_err(to_message)?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err("无法在 Finder 中定位当前应用".into())
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        open::that(app_path).map_err(to_message)
+    }
+}
+
+fn current_app_bundle_path() -> Option<PathBuf> {
+    let current_exe = std::env::current_exe().ok()?;
+    for ancestor in current_exe.ancestors() {
+        if ancestor
+            .extension()
+            .is_some_and(|extension| extension == "app")
+        {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    Some(current_exe)
+}
+
+#[cfg(target_os = "macos")]
+fn accessibility_permission_message(prompted: bool) -> String {
+    if prompted {
+        return "已复制。请在系统设置中允许当前 VviTools 使用辅助功能权限，开启后可自动粘贴到原输入框。".into();
+    }
+    "已复制。VviTools 当前仍未取得有效辅助功能权限；如果系统设置里已经开启，通常是本地重新打包后 macOS 授权记录失效，请移除 VviTools 后重新添加当前应用，或使用稳定签名的安装包。".into()
+}
+
+fn is_accessibility_trusted(prompt: bool) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos_accessibility_trusted(prompt)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
 fn previous_frontmost_app() -> &'static Mutex<Option<String>> {
     PREVIOUS_FRONTMOST_APP.get_or_init(|| Mutex::new(None))
 }
@@ -397,13 +567,10 @@ fn is_safe_bundle_id(value: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'))
 }
 
-fn paste_to_previous_frontmost_app() {
+fn paste_to_previous_frontmost_app() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        let bundle_id = previous_frontmost_app()
-            .lock()
-            .ok()
-            .and_then(|previous| previous.clone());
+        let bundle_id = previous_frontmost_app().lock().map_err(to_message)?.clone();
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(120));
             let mut script = String::new();
@@ -419,7 +586,30 @@ fn paste_to_previous_frontmost_app() {
             );
             let _ = Command::new("osascript").args(["-e", &script]).output();
         });
+        Ok(())
     }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_accessibility_trusted(prompt: bool) -> bool {
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+        fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> bool;
+    }
+
+    if !prompt {
+        return unsafe { AXIsProcessTrusted() };
+    }
+
+    let key = CFString::new("AXTrustedCheckOptionPrompt");
+    let value = CFBoolean::true_value();
+    let options = CFDictionary::from_CFType_pairs(&[(key, value)]);
+    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) }
 }
 
 #[tauri::command]
@@ -615,6 +805,22 @@ pub fn open_launcher_from_floating(app: tauri::AppHandle) -> Result<(), String> 
 }
 
 #[tauri::command]
+pub fn open_accessibility_permission_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(clipboard_window) = app.get_webview_window("clipboard") {
+        let _ = clipboard_window.hide();
+    }
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    apply_launcher_window(&window, "permission")?;
+    window.show().map_err(to_message)?;
+    let _ = window.emit("open-accessibility-permission", ());
+    let _ = window
+        .eval("window.dispatchEvent(new CustomEvent('vvitools-open-accessibility-permission'))");
+    window.set_focus().map_err(to_message)
+}
+
+#[tauri::command]
 pub fn begin_floating_drag(app: AppHandle, request: FloatingDragRequest) -> Result<(), String> {
     let window = app
         .get_webview_window("floating")
@@ -692,6 +898,7 @@ pub fn set_launcher_view(app: tauri::AppHandle, view: String) -> Result<(), Stri
 pub fn apply_launcher_window(window: &WebviewWindow, view: &str) -> Result<(), String> {
     let size = match view {
         "feature" => LogicalSize::new(980.0, 640.0),
+        "permission" => LogicalSize::new(680.0, 500.0),
         "clipboard" => LogicalSize::new(940.0, 238.0),
         _ => LogicalSize::new(720.0, 420.0),
     };

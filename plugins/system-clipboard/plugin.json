@@ -13,7 +13,7 @@
     "bridge": "host.clipboard",
     "host_commands": ["clipboard.open"]
   },
-  "permissions": ["clipboard:read", "clipboard:write"],
+  "permissions": ["clipboard:read", "clipboard:write", "accessibility:paste"],
   "commands": [
     {
       "id": "clipboard.open",

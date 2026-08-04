@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 anyhow = "1"
 arboard = "3"
 chrono = { version = "0.4", features = ["serde"] }
+core-foundation = "0.10"
 dirs = "6"
 fs_extra = "1"
 image = "0.25"
