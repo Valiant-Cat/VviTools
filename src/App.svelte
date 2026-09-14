@@ -1,16 +1,22 @@
 <script lang="ts">
-  import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+  import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { onDestroy, tick } from "svelte";
+  import ClipboardSettingsView from "../plugins/system-clipboard/ui/ClipboardSettings.svelte";
+  import ClipboardWindow from "../plugins/system-clipboard/ui/ClipboardWindow.svelte";
+  import type {
+    ClipboardFilter,
+    ClipboardItem,
+    ClipboardSettings,
+    ClipboardStorageInfo,
+  } from "../plugins/system-clipboard/ui/types";
   import {
     ArrowLeft,
     ArrowRight,
     Box,
     Check,
     ClipboardList,
-    Copy,
     DownloadCloud,
-    FolderOpen,
     Heart,
     Loader2,
     PackageSearch,
@@ -81,19 +87,6 @@
     | { type: "open_url"; url: string }
     | { type: "shell"; command: string };
 
-  type ClipboardItem = {
-    id: string;
-    kind: "text" | "image" | "file";
-    text: string;
-    preview: string;
-    copied_at: string;
-    favorite?: boolean;
-    image_path?: string;
-    width?: number;
-    height?: number;
-    file_paths?: string[];
-  };
-
   type AccessibilityPermissionStatus = {
     granted: boolean;
     supported: boolean;
@@ -107,24 +100,6 @@
     needs_accessibility_permission: boolean;
     message: string;
   };
-
-  type ClipboardSettings = {
-    enabled: boolean;
-    retention_days: number;
-    max_items: number;
-    capture_text: boolean;
-    capture_images: boolean;
-    capture_files: boolean;
-  };
-
-  type ClipboardStorageInfo = {
-    directory: string;
-    total_bytes: number;
-    item_count: number;
-    image_count: number;
-  };
-
-  type ClipboardFilter = "all" | "text" | "image" | "file" | "favorite";
 
   type View =
     | "launcher"
@@ -695,16 +670,6 @@
     }
   }
 
-  function changeClipboardRetention(event: Event) {
-    const retentionDays = Number((event.currentTarget as HTMLSelectElement).value);
-    void updateClipboardSettings({ retention_days: retentionDays });
-  }
-
-  function changeClipboardMaxItems(event: Event) {
-    const maxItems = Number((event.currentTarget as HTMLSelectElement).value);
-    void updateClipboardSettings({ max_items: maxItems });
-  }
-
   async function openClipboardStorageLocation() {
     error = "";
     try {
@@ -998,31 +963,6 @@
     return "支持导入 VviTools plugin.json，或包含 plugins 数组的 JSON 配置文件。自定义插件支持 node / shell 运行时。";
   }
 
-  function clipboardEmptyText() {
-    if (query) return "没有匹配记录";
-    if (clipboardFilter === "image") return "暂无图片记录";
-    if (clipboardFilter === "file") return "暂无文件记录";
-    if (clipboardFilter === "favorite") return "暂无收藏记录";
-    if (clipboardFilter === "text") return "暂无文本记录";
-    return "暂无剪贴板历史";
-  }
-
-  function clipboardImageSrc(item: ClipboardItem) {
-    return item.image_path ? convertFileSrc(item.image_path) : "";
-  }
-
-  function clipboardItemLabel(item: ClipboardItem) {
-    if (item.kind === "image") return "图片";
-    if (item.kind === "file") return item.file_paths?.length && item.file_paths.length > 1 ? "多文件" : "文件";
-    return "纯文本";
-  }
-
-  function clipboardItemMeta(item: ClipboardItem) {
-    if (item.kind === "image") return `${item.width || 0} x ${item.height || 0}`;
-    if (item.kind === "file") return `${item.file_paths?.length || 1} 个文件`;
-    return `${item.text.length} 个字符`;
-  }
-
   function commandDisplayName(command: CommandMatch) {
     return command.title || command.keyword;
   }
@@ -1033,17 +973,6 @@
 
   function launcherCardName(command: CommandMatch) {
     return command.plugin_name || command.title || command.keyword;
-  }
-
-  function formatClipboardTime(value: string) {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "";
-    return date.toLocaleString("zh-CN", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
   }
 
   function initials(value = "VT") {
@@ -1061,18 +990,6 @@
     if (view === "clipboard-settings") return "剪贴板设置";
     if (view === "clipboard") return "剪贴板";
     return selectedCategoryLabel;
-  }
-
-  function formatBytes(value: number) {
-    if (value < 1024) return `${value} B`;
-    const units = ["KB", "MB", "GB"];
-    let size = value / 1024;
-    let unitIndex = 0;
-    while (size >= 1024 && unitIndex < units.length - 1) {
-      size /= 1024;
-      unitIndex += 1;
-    }
-    return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
   }
 
   refreshAll();
@@ -1124,122 +1041,26 @@
 </script>
 
 {#if isClipboardWindow}
-  <main class="rubick-window clipboard-window" data-tauri-drag-region>
-    <header class="copycat-topbar">
-      <strong>剪贴板</strong>
-      <div class="copycat-search">
-        <Search size={18} />
-        <input
-          bind:this={searchInput}
-          bind:value={query}
-          on:input={onInput}
-          on:keydown={handleKeydown}
-          placeholder="搜索"
-          spellcheck="false"
-        />
-        {#if query}
-          <button class="clear" on:click={() => ((query = ""), onInput())} type="button"><X size={15} /></button>
-        {/if}
-      </div>
-      <div class="copycat-filters">
-        <button class:active={clipboardFilter === "all"} on:click={() => setClipboardFilter("all")} type="button">
-          {#if clipboardFilter === "all"}<Check size={15} />{/if}全部
-        </button>
-        <button class:active={clipboardFilter === "text"} on:click={() => setClipboardFilter("text")} type="button">
-          {#if clipboardFilter === "text"}<Check size={15} />{/if}文本
-        </button>
-        <button class:active={clipboardFilter === "image"} on:click={() => setClipboardFilter("image")} type="button">
-          {#if clipboardFilter === "image"}<Check size={15} />{/if}图片
-        </button>
-        <button class:active={clipboardFilter === "file"} on:click={() => setClipboardFilter("file")} type="button">
-          {#if clipboardFilter === "file"}<Check size={15} />{/if}文件
-        </button>
-        <button class:active={clipboardFilter === "favorite"} on:click={() => setClipboardFilter("favorite")} type="button">
-          {#if clipboardFilter === "favorite"}<Check size={15} />{/if}收藏
-        </button>
-      </div>
-      <div class="copycat-hotkey">
-        <span>↯</span>
-        <strong>系统快捷键</strong>
-        <kbd>⌥ V</kbd>
-      </div>
-    </header>
-    <section class="copycat-board" bind:this={clipboardBoard}>
-      {#if error}
-        <div class="launcher-status error"><Terminal size={18} />{error}</div>
-      {:else}
-        {#if clipboardStatus}
-          <div
-            class:warning={showAccessibilityDialog || (!accessibilityPermissionGranted && accessibilityPermissionSupported)}
-            class="launcher-status compact"
-          >
-            <Terminal size={18} />{clipboardStatus}
-            {#if !accessibilityPermissionGranted && accessibilityPermissionSupported}
-              <button class="inline-link" on:click={() => openAccessibilityDialog()} type="button">查看授权</button>
-            {/if}
-          </div>
-        {/if}
-        {#if filteredClipboardItems.length}
-          {#each filteredClipboardItems as item, index}
-            <article
-              class:image-card={item.kind === "image"}
-              class:file-card={item.kind === "file"}
-              class:selected={selectedIndex === index}
-              class="copycat-card text-card"
-              data-selected={selectedIndex === index}
-            >
-              <button
-                class="copycat-card-main"
-                on:click={() => copyClipboardItem(item, true)}
-                on:mouseenter={() => (selectedIndex = index)}
-                type="button"
-              >
-                <span class="copycat-card-head">
-                  <span class="copycat-card-type">{clipboardItemLabel(item)}</span>
-                  <small>{formatClipboardTime(item.copied_at)}</small>
-                </span>
-                {#if item.kind === "image"}
-                  <div class="copycat-image-preview">
-                    <img src={clipboardImageSrc(item)} alt={item.preview || "剪贴板图片"} />
-                  </div>
-                {:else if item.kind === "file"}
-                  <p class="copycat-file-name">{item.preview || item.text}</p>
-                {:else}
-                  <p>{item.preview || item.text}</p>
-                {/if}
-              </button>
-              <footer>
-                <span>
-                  {clipboardItemMeta(item)}
-                </span>
-                <div>
-                  <button
-                    class:active={item.favorite}
-                    aria-label={item.favorite ? "取消收藏" : "收藏"}
-                    on:click={() => toggleClipboardFavorite(item)}
-                    type="button"
-                  >
-                    <Heart size={15} fill={item.favorite ? "currentColor" : "none"} />
-                  </button>
-                  <button aria-label="复制" on:click={() => copyClipboardItem(item, true)} type="button">
-                    <Copy size={16} />
-                  </button>
-                  <button aria-label="删除" on:click={() => deleteClipboardItem(item)} type="button">
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </footer>
-            </article>
-          {/each}
-        {:else}
-          <div class="copycat-empty">
-            <ClipboardList size={46} />
-            <strong>{clipboardEmptyText()}</strong>
-          </div>
-        {/if}
-      {/if}
-    </section>
-  </main>
+  <ClipboardWindow
+    items={filteredClipboardItems}
+    bind:query
+    filter={clipboardFilter}
+    bind:selectedIndex
+    {error}
+    status={clipboardStatus}
+    permissionWarning={showAccessibilityDialog ||
+      (!accessibilityPermissionGranted && accessibilityPermissionSupported)}
+    permissionSupported={!accessibilityPermissionGranted && accessibilityPermissionSupported}
+    bind:searchInput
+    bind:board={clipboardBoard}
+    {onInput}
+    onKeydown={handleKeydown}
+    onFilter={setClipboardFilter}
+    onPaste={(item) => copyClipboardItem(item, true)}
+    onFavorite={toggleClipboardFavorite}
+    onDelete={deleteClipboardItem}
+    onPermission={openAccessibilityDialog}
+  />
 {:else if view === "permission"}
   <main class="rubick-window permission-window" data-tauri-drag-region>
     <div class="permission-dialog standalone" role="dialog" aria-modal="true" aria-labelledby="permission-title">
@@ -1652,182 +1473,17 @@
           </div>
         </div>
       {:else if view === "clipboard-settings"}
-        <div class="clipboard-settings-page">
-          <button class="detail-back" on:click={backToClipboardDetail} type="button">
-            <ArrowLeft size={18} />
-            返回系统剪贴板
-          </button>
-          <div class="page-heading settings-heading">
-            <div class="view-title">剪贴板设置</div>
-            <small>控制记录范围、历史保留和本地存储</small>
-          </div>
-          <section class="settings-panel settings-page">
-            <div class="settings-group">
-              <h2>记录</h2>
-              <div class="settings-list">
-                <div class="settings-row">
-                  <span>
-                    <strong>记录剪贴板</strong>
-                    <small>关闭后暂停新增记录，已有历史和收藏不会被删除。</small>
-                  </span>
-                  <button
-                    class="settings-switch"
-                    class:enabled={clipboardSettings.enabled}
-                    disabled={clipboardSettingsLoading}
-                    aria-pressed={clipboardSettings.enabled}
-                    on:click={() => updateClipboardSettings({ enabled: !clipboardSettings.enabled })}
-                    type="button"
-                  >
-                    <span class="sr-only">{clipboardSettings.enabled ? "已开启" : "已关闭"}</span>
-                    <span class="settings-switch-thumb"></span>
-                  </button>
-                </div>
-                <div class="settings-row compact-setting">
-                  <span>
-                    <strong>文本</strong>
-                    <small>保存复制的文字、链接和代码片段。</small>
-                  </span>
-                  <button
-                    class="settings-switch"
-                    class:enabled={clipboardSettings.capture_text}
-                    disabled={clipboardSettingsLoading}
-                    aria-pressed={clipboardSettings.capture_text}
-                    on:click={() => updateClipboardSettings({ capture_text: !clipboardSettings.capture_text })}
-                    type="button"
-                  >
-                    <span class="sr-only">{clipboardSettings.capture_text ? "已开启" : "已关闭"}</span>
-                    <span class="settings-switch-thumb"></span>
-                  </button>
-                </div>
-                <div class="settings-row compact-setting">
-                  <span>
-                    <strong>图片</strong>
-                    <small>图片会作为 PNG 文件保存在本机。</small>
-                  </span>
-                  <button
-                    class="settings-switch"
-                    class:enabled={clipboardSettings.capture_images}
-                    disabled={clipboardSettingsLoading}
-                    aria-pressed={clipboardSettings.capture_images}
-                    on:click={() => updateClipboardSettings({ capture_images: !clipboardSettings.capture_images })}
-                    type="button"
-                  >
-                    <span class="sr-only">{clipboardSettings.capture_images ? "已开启" : "已关闭"}</span>
-                    <span class="settings-switch-thumb"></span>
-                  </button>
-                </div>
-                <div class="settings-row compact-setting">
-                  <span>
-                    <strong>文件</strong>
-                    <small>只保存文件路径，不会复制或移动原文件。</small>
-                  </span>
-                  <button
-                    class="settings-switch"
-                    class:enabled={clipboardSettings.capture_files}
-                    disabled={clipboardSettingsLoading}
-                    aria-pressed={clipboardSettings.capture_files}
-                    on:click={() => updateClipboardSettings({ capture_files: !clipboardSettings.capture_files })}
-                    type="button"
-                  >
-                    <span class="sr-only">{clipboardSettings.capture_files ? "已开启" : "已关闭"}</span>
-                    <span class="settings-switch-thumb"></span>
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div class="settings-group">
-              <h2>历史</h2>
-              <div class="settings-list">
-                <label class="settings-row" for="clipboard-retention">
-                  <span>
-                    <strong>保留时长</strong>
-                    <small>到期的普通记录会自动清理，收藏内容不受影响。</small>
-                  </span>
-                  <select
-                    id="clipboard-retention"
-                    class="settings-select"
-                    disabled={clipboardSettingsLoading}
-                    value={clipboardSettings.retention_days}
-                    on:change={changeClipboardRetention}
-                  >
-                    <option value="1">1 天</option>
-                    <option value="7">7 天</option>
-                    <option value="30">30 天</option>
-                    <option value="90">90 天</option>
-                    <option value="0">永久保留</option>
-                  </select>
-                </label>
-                <label class="settings-row" for="clipboard-max-items">
-                  <span>
-                    <strong>最大历史条数</strong>
-                    <small>达到上限后优先保留收藏，再清理较旧的普通记录。</small>
-                  </span>
-                  <select
-                    id="clipboard-max-items"
-                    class="settings-select"
-                    disabled={clipboardSettingsLoading}
-                    value={clipboardSettings.max_items}
-                    on:change={changeClipboardMaxItems}
-                  >
-                    <option value="100">100 条</option>
-                    <option value="200">200 条</option>
-                    <option value="500">500 条</option>
-                    <option value="1000">1000 条</option>
-                  </select>
-                </label>
-              </div>
-            </div>
-            <div class="settings-group">
-              <h2>存储</h2>
-              <div class="settings-list">
-                <div class="settings-row storage-row">
-                  <span>
-                    <strong>本地存储位置</strong>
-                    <small class="settings-path" title={clipboardStorageInfo.directory}>
-                      {clipboardStorageInfo.directory || "正在读取..."}
-                    </small>
-                  </span>
-                  <button class="secondary settings-icon-action" on:click={openClipboardStorageLocation} type="button">
-                    <FolderOpen size={15} />
-                    在 Finder 中打开
-                  </button>
-                </div>
-                <div class="settings-row">
-                  <span>
-                    <strong>存储占用</strong>
-                    <small>
-                      {clipboardStorageInfo.item_count} 条记录，其中 {clipboardStorageInfo.image_count} 张图片
-                    </small>
-                  </span>
-                  <em>{formatBytes(clipboardStorageInfo.total_bytes)}</em>
-                </div>
-                <div class="settings-row">
-                  <span>
-                    <strong>清空全部历史</strong>
-                    <small>删除所有记录和已保存图片，剪贴板设置保持不变。</small>
-                  </span>
-                  <div class="settings-actions">
-                    {#if clipboardClearConfirm}
-                      <button class="secondary" on:click={() => (clipboardClearConfirm = false)} type="button">
-                        取消
-                      </button>
-                    {/if}
-                    <button
-                      class:confirming={clipboardClearConfirm}
-                      class="danger-action"
-                      disabled={clipboardSettingsLoading || clipboardStorageInfo.item_count === 0}
-                      on:click={clearClipboardHistory}
-                      type="button"
-                    >
-                      <Trash2 size={15} />
-                      {clipboardClearConfirm ? "确认清空" : "清空"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
+        <ClipboardSettingsView
+          settings={clipboardSettings}
+          storageInfo={clipboardStorageInfo}
+          loading={clipboardSettingsLoading}
+          clearConfirm={clipboardClearConfirm}
+          onBack={backToClipboardDetail}
+          onUpdate={updateClipboardSettings}
+          onOpenStorage={openClipboardStorageLocation}
+          onClear={clearClipboardHistory}
+          onCancelClear={() => (clipboardClearConfirm = false)}
+        />
       {:else}
         <div class="page-heading settings-heading">
           <div class="view-title">设置</div>

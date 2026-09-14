@@ -47,6 +47,8 @@ pub struct PluginManifest {
     #[serde(default)]
     pub builtin: Option<BuiltinPluginSpec>,
     #[serde(default)]
+    pub ui: Option<PluginUiSpec>,
+    #[serde(default)]
     pub permissions: Vec<String>,
     #[serde(default)]
     pub commands: Vec<PluginCommand>,
@@ -58,6 +60,16 @@ pub struct BuiltinPluginSpec {
     pub bridge: String,
     #[serde(default)]
     pub host_commands: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PluginUiSpec {
+    #[serde(default)]
+    pub window: String,
+    #[serde(default)]
+    pub settings: String,
+    #[serde(default)]
+    pub styles: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -480,6 +492,14 @@ fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
     }
     if manifest.icon.contains("..") {
         return Err(anyhow!("插件图标路径不能包含上级目录"));
+    }
+    if let Some(ui) = &manifest.ui {
+        if [ui.window.as_str(), ui.settings.as_str(), ui.styles.as_str()]
+            .iter()
+            .any(|path| path.contains(".."))
+        {
+            return Err(anyhow!("插件 UI 路径不能包含上级目录"));
+        }
     }
     if manifest.categories.is_empty() {
         return Err(anyhow!(

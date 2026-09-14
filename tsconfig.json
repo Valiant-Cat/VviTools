@@ -7,6 +7,12 @@
     "moduleResolution": "bundler",
     "strict": true
   },
-  "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.svelte"],
+  "include": [
+    "src/**/*.d.ts",
+    "src/**/*.ts",
+    "src/**/*.svelte",
+    "plugins/**/*.ts",
+    "plugins/**/*.svelte"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -12,6 +12,11 @@ plugins/system-clipboard/
   builtin.ts
   README.md
   assets/icon.svg
+  ui/
+    ClipboardWindow.svelte
+    ClipboardSettings.svelte
+    clipboard.css
+    types.ts
 ```
 
 ## 运行方式
@@ -20,6 +25,9 @@ plugins/system-clipboard/
 - `entry: "builtin.ts"` 是内置插件的契约说明和类型化入口。
 - `builtin.bridge: "host.clipboard"` 绑定到宿主剪贴板桥接。
 - `builtin.host_commands` 声明该插件允许调用的宿主命令。
+- `ui.window` 声明独立剪贴板窗口组件。
+- `ui.settings` 声明剪贴板设置组件。
+- `ui.styles` 声明插件专属样式入口。
 
 ## 能力边界
 
@@ -37,3 +45,6 @@ plugins/system-clipboard/
 - 插件市场/已安装页中的应用信息。
 - 搜索命令 `clipboard` / `剪贴板`。
 - 内置桥接契约和图标资产。
+- 独立剪贴板窗口和设置页的 Svelte UI。
+
+主应用只负责路由、状态和调用宿主命令，不再直接维护剪贴板页面模板。当前 UI 入口为一方插件的编译期组件，不对普通导入插件开放任意前端代码执行。

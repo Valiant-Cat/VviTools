@@ -10,7 +10,7 @@ mod tests {
     use crate::plugin::{
         action_allowed, install_plugin_from_zip, load_available_plugins, load_plugins,
         run_plugin_command, search_commands, CommandInput, InstalledPlugin, MarketplaceEntry,
-        PermissionDecision, PluginManifest, PluginRuntime, RpcAction, RpcResult,
+        PermissionDecision, PluginManifest, PluginRuntime, PluginUiSpec, RpcAction, RpcResult,
     };
 
     fn sample_manifest(runtime: PluginRuntime, entry: &str) -> PluginManifest {
@@ -25,6 +25,7 @@ mod tests {
             runtime,
             entry: entry.into(),
             builtin: None,
+            ui: None,
             permissions: vec!["clipboard".into()],
             commands: vec![crate::plugin::PluginCommand {
                 id: "echo.run".into(),
@@ -40,17 +41,47 @@ mod tests {
         let dir = tempdir().unwrap();
         let plugin_dir = dir.path().join("dev.vvicat.echo");
         fs::create_dir_all(&plugin_dir).unwrap();
+        let mut manifest = sample_manifest(PluginRuntime::Shell, "main.sh");
+        manifest.ui = Some(PluginUiSpec {
+            window: "ui/Window.svelte".into(),
+            settings: "ui/Settings.svelte".into(),
+            styles: "ui/styles.css".into(),
+        });
         fs::write(
             plugin_dir.join("plugin.json"),
-            serde_json::to_vec_pretty(&sample_manifest(PluginRuntime::Shell, "main.sh")).unwrap(),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
         )
         .unwrap();
 
         let plugins = load_plugins(dir.path()).unwrap();
         assert_eq!(plugins.len(), 1);
+        assert_eq!(
+            plugins[0].manifest.ui.as_ref().unwrap().window,
+            "ui/Window.svelte"
+        );
         let matches = search_commands(&plugins, "回显");
         assert_eq!(matches[0].plugin_id, "dev.vvicat.echo");
         assert_eq!(matches[0].command_id, "echo.run");
+    }
+
+    #[test]
+    fn load_plugins_rejects_parent_paths_in_ui_entries() {
+        let dir = tempdir().unwrap();
+        let plugin_dir = dir.path().join("dev.vvicat.echo");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        let mut manifest = sample_manifest(PluginRuntime::Shell, "main.sh");
+        manifest.ui = Some(PluginUiSpec {
+            window: "../Window.svelte".into(),
+            settings: String::new(),
+            styles: String::new(),
+        });
+        fs::write(
+            plugin_dir.join("plugin.json"),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        assert!(load_plugins(dir.path()).is_err());
     }
 
     #[test]

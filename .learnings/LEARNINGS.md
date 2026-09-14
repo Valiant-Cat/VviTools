@@ -4,6 +4,29 @@
 
 ---
 
+## [LRN-20260914-010] architecture
+
+**Logged**: 2026-09-14T17:30:00+08:00
+**Priority**: high
+**Status**: done
+**Area**: frontend
+
+### Summary
+捆绑内置插件的可见 UI 应归档在插件目录，主应用只负责路由、状态和宿主桥接。
+
+### Details
+系统剪贴板此前仅把 manifest 和桥接契约放在 `plugins/system-clipboard`，窗口与设置模板仍集中在 `src/App.svelte`。这会让插件归属不完整，也让主组件持续膨胀。现已将窗口、设置、类型和专属样式迁入插件目录，并通过 manifest 的 `ui` 字段声明入口。
+
+### Suggested Action
+后续新增一方内置工具时，将应用信息、UI 组件和专属样式放在对应插件目录；系统级能力仍由 Rust 宿主提供。普通导入插件不得因为该结构获得任意前端代码执行能力。
+
+### Metadata
+- Source: user_feedback
+- Related Files: plugins/system-clipboard/ui, src/App.svelte, src-tauri/src/plugin.rs
+- Tags: builtin-plugin, ui-ownership, architecture
+
+---
+
 ## [LRN-20260914-008] frontend
 
 **Logged**: 2026-09-14T16:45:00+08:00

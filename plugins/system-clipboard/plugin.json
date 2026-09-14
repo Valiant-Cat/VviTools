@@ -13,6 +13,11 @@
     "bridge": "host.clipboard",
     "host_commands": ["clipboard.open"]
   },
+  "ui": {
+    "window": "ui/ClipboardWindow.svelte",
+    "settings": "ui/ClipboardSettings.svelte",
+    "styles": "ui/clipboard.css"
+  },
   "permissions": ["clipboard:read", "clipboard:write", "accessibility:paste"],
   "commands": [
     {
