@@ -1,6 +1,6 @@
 [package]
 name = "vvitools"
-version = "0.1.1"
+version = "0.1.2"
 description = "极简高性能插件化桌面工具箱"
 authors = ["liam"]
 edition = "2021"
