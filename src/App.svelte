@@ -111,20 +111,23 @@
 
   type View = "launcher" | "finder" | "clipboard" | "installed" | "settings" | "permission";
   type PluginCategoryKey = "efficiency" | "search" | "image" | "developer" | "system";
-  type PluginCategory = "explore" | PluginCategoryKey | "custom";
+  type PluginCategory = "explore" | "developer" | "custom";
 
   const CLIPBOARD_APP_ID = "system-clipboard";
   const params = new URLSearchParams(window.location.search);
   const isClipboardWindow = params.get("window") === "clipboard";
   const pluginCategories: Array<{ key: PluginCategory; label: string }> = [
     { key: "explore", label: "探索" },
-    { key: "efficiency", label: "效率" },
-    { key: "search", label: "搜索工具" },
-    { key: "image", label: "图像" },
-    { key: "developer", label: "开发者" },
-    { key: "system", label: "系统" },
-    { key: "custom", label: "自定义插件" },
+    { key: "developer", label: "开发" },
+    { key: "custom", label: "自定义" },
   ];
+  const categoryLabels: Record<PluginCategoryKey, string> = {
+    efficiency: "效率",
+    search: "搜索",
+    image: "图像",
+    developer: "开发",
+    system: "系统",
+  };
 
   let view: View = isClipboardWindow ? "clipboard" : params.get("view") === "finder" ? "finder" : "launcher";
   let selectedPluginCategory: PluginCategory = "explore";
@@ -173,14 +176,15 @@
     (item) => matchText(item, query) && matchesPluginCategory(item, selectedPluginCategory)
   );
   $: filteredPlugins = plugins.filter((plugin) => matchText(plugin, query));
+  $: installedMarket = filteredPlugins.map(pluginViewToMarketEntry);
   $: filteredClipboardItems = clipboardItems.filter(
     (item) =>
       (clipboardFilter === "favorite" ? item.favorite : clipboardFilter === "all" || item.kind === clipboardFilter) &&
       matchClipboardText(item, query)
   );
   $: marketDetail = filteredMarket.find((item) => item.id === selectedMarketId) ?? filteredMarket[0];
-  $: isClipboardApp = marketDetail?.id === CLIPBOARD_APP_ID;
-  $: pluginDetail = filteredPlugins.find((plugin) => plugin.id === selectedPluginId) ?? filteredPlugins[0];
+  $: installedDetail = installedMarket.find((item) => item.id === selectedPluginId) ?? installedMarket[0];
+  $: activeDetail = view === "installed" ? installedDetail : marketDetail;
   $: selectedCategoryLabel =
     pluginCategories.find((category) => category.key === selectedPluginCategory)?.label ?? "探索";
   $: launcherItems = query ? commands : [];
@@ -190,7 +194,9 @@
       ? filteredClipboardItems.length
       : view === "launcher"
         ? Math.max(launcherItems.length, recentItems.length)
-        : filteredMarket.length;
+        : view === "installed"
+          ? installedMarket.length
+          : filteredMarket.length;
   $: if (view === "clipboard") clampClipboardSelection();
   $: if (view === "clipboard" && filteredClipboardItems.length) void scrollSelectedClipboardItemIntoView();
 
@@ -251,7 +257,7 @@
 
   async function run(command: CommandMatch) {
     if (command.plugin_id === CLIPBOARD_APP_ID) {
-      await invoke("open_clipboard_window");
+      await openClipboardWindow();
       return;
     }
     loading = true;
@@ -271,6 +277,15 @@
       error = String(err);
     } finally {
       loading = false;
+    }
+  }
+
+  async function openClipboardWindow() {
+    error = "";
+    try {
+      await invoke("open_clipboard_window");
+    } catch (err) {
+      error = String(err);
     }
   }
 
@@ -408,6 +423,11 @@
     marketDetailOpen = true;
   }
 
+  async function activateInstalledItem(item: MarketplaceEntry) {
+    selectedPluginId = item.id;
+    marketDetailOpen = true;
+  }
+
   function closeMarketDetail() {
     marketDetailOpen = false;
   }
@@ -420,7 +440,9 @@
     error = "";
     clipboardStatus = "";
     if (nextView === "clipboard") await loadClipboardHistory();
-    await invoke("set_launcher_view", { view: "feature" });
+    await invoke("set_launcher_view", { view: "feature" }).catch(() => {
+      // 浏览器预览环境没有 Tauri 窗口。
+    });
     await tick();
     resetViewport();
     searchInput?.focus();
@@ -432,8 +454,15 @@
     await openFeature("finder");
   }
 
+  async function openInstalled() {
+    marketDetailOpen = false;
+    await openFeature("installed");
+  }
+
   async function backToLauncher() {
-    await invoke("set_launcher_view", { view: "launcher" });
+    await invoke("set_launcher_view", { view: "launcher" }).catch(() => {
+      // 浏览器预览环境没有 Tauri 窗口。
+    });
     await resetLauncherState();
   }
 
@@ -800,12 +829,26 @@
   }
 
   function categoryLabel(category: PluginCategoryKey) {
-    return pluginCategories.find((item) => item.key === category)?.label ?? category;
+    return categoryLabels[category];
+  }
+
+  function permissionLabel(permission: string) {
+    const labels: Record<string, string> = {
+      "clipboard:read": "读取剪贴板内容",
+      "clipboard:write": "写入剪贴板内容",
+      "accessibility:paste": "粘贴到当前输入框",
+      shell: "运行本地命令",
+      network: "访问网络",
+      filesystem: "访问本地文件",
+    };
+    return labels[permission] ?? "插件运行所需权限";
   }
 
   function categoryEmptyText() {
     if (query) return "没有匹配插件";
-    return `${selectedCategoryLabel} 分类暂无插件`;
+    if (selectedPluginCategory === "developer") return "暂无开发工具";
+    if (selectedPluginCategory === "custom") return "还没有导入自定义插件";
+    return "这里还没有插件";
   }
 
   function isClipboardEntry(item: MarketplaceEntry) {
@@ -1200,7 +1243,7 @@
           bind:value={query}
           on:input={onInput}
           on:keydown={handleKeydown}
-          placeholder={view === "installed" ? "搜索已安装插件" : "搜索插件"}
+          placeholder={view === "installed" ? "搜索已安装" : "搜索插件"}
         />
         {#if query}
           <button class="clear" on:click={() => ((query = ""), onInput())} type="button"><X size={15} /></button>
@@ -1214,18 +1257,14 @@
             type="button"
           >
             {#if item.key === "explore"}<Star size={16} />{/if}
-            {#if item.key === "efficiency"}<Play size={16} />{/if}
-            {#if item.key === "search"}<Search size={16} />{/if}
-            {#if item.key === "image"}<Box size={16} />{/if}
             {#if item.key === "developer"}<Terminal size={16} />{/if}
-            {#if item.key === "system"}<ClipboardList size={16} />{/if}
             {#if item.key === "custom"}<PackageSearch size={16} />{/if}
             {item.label}
           </button>
         {/each}
       </nav>
       <div class="user-menu">
-        <button class:active={view === "installed"} on:click={() => (view = "installed")} type="button">
+        <button class:active={view === "installed"} on:click={openInstalled} type="button">
           <Heart size={16} />
           已安装
         </button>
@@ -1237,95 +1276,108 @@
     </aside>
 
     <section class="feature-container">
-      {#if view === "finder"}
-        {#if marketDetailOpen && marketDetail}
+      {#if (view === "finder" || view === "installed") && marketDetailOpen && activeDetail}
           <article class="market-detail-page">
             <button class="detail-back" on:click={closeMarketDetail} type="button" aria-label="返回插件列表">
-              <ArrowLeft size={26} />
+              <ArrowLeft size={18} />
+              返回
             </button>
             <section class="market-detail-hero">
               <span class="plugin-icon market-detail-icon">
-                {#if isClipboardEntry(marketDetail)}<ClipboardList size={34} />{:else}{initials(marketDetail.name)}{/if}
+                {#if isClipboardEntry(activeDetail)}<ClipboardList size={27} />{:else}{initials(activeDetail.name)}{/if}
               </span>
               <div class="market-detail-title">
-                <h2>{marketDetail.name}</h2>
-                <p>{marketDetail.description}</p>
-                {#if isClipboardEntry(marketDetail)}
-                  <button class="primary detail-action" on:click={openClipboardPanel} type="button">打开</button>
-                {:else if installedIds.has(marketDetail.id)}
-                  <button class="primary detail-action" disabled type="button">已安装</button>
+                <div class="market-detail-name">
+                  <h2>{activeDetail.name}</h2>
+                  <span>{activeDetail.bundled ? "内置" : installedIds.has(activeDetail.id) ? "已安装" : "可获取"}</span>
+                </div>
+                <p>{activeDetail.description}</p>
+                <div class="market-detail-summary">
+                  <span>版本 {activeDetail.version}</span>
+                  <span>{activeDetail.categories.map(categoryLabel).join("、") || "通用工具"}</span>
+                  <span>{activeDetail.bundled ? "随 VviTools 提供" : "用户安装"}</span>
+                </div>
+              </div>
+              <div class="market-detail-actions">
+                {#if isClipboardEntry(activeDetail)}
+                  <button class="primary detail-action" on:click={openClipboardWindow} type="button">
+                    <Play size={15} />
+                    打开
+                  </button>
+                {:else if installedIds.has(activeDetail.id)}
+                  <button class="primary detail-action" disabled type="button"><Check size={15} />已安装</button>
                 {:else}
-                  <button class="primary detail-action" disabled={loading} on:click={() => install(marketDetail)} type="button">
-                    {#if loading}<Loader2 class="spin" size={16} />{:else}<DownloadCloud size={17} />{/if}
+                  <button class="primary detail-action" disabled={loading} on:click={() => install(activeDetail)} type="button">
+                    {#if loading}<Loader2 class="spin" size={15} />{:else}<DownloadCloud size={15} />{/if}
                     获取
+                  </button>
+                {/if}
+                {#if view === "finder" && selectedPluginCategory === "custom" && !activeDetail.bundled}
+                  <button class="detail-delete" on:click={deleteSelectedCustomPlugin} type="button">
+                    <Trash2 size={15} />
+                    删除
                   </button>
                 {/if}
               </div>
             </section>
-            <section class="market-detail-stats">
-              <div>
-                <strong>分类</strong>
-                <span>{marketDetail.categories.map(categoryLabel).join("、") || "未分类"}</span>
-              </div>
-              <div>
-                <strong>类型</strong>
-                <span>{marketDetail.bundled ? "内置插件" : "第三方插件"}</span>
-              </div>
-              <div>
-                <strong>运行时</strong>
-                <span>{marketDetail.runtime || "plugin"}</span>
-              </div>
-              <div>
-                <strong>版本</strong>
-                <span>{marketDetail.version}</span>
-              </div>
+            <section class="market-detail-section">
+              <header>
+                <h3>功能</h3>
+                <p>从搜索窗口或对应快捷入口直接使用。</p>
+              </header>
+              {#if isClipboardEntry(activeDetail)}
+                <div class="capability-list">
+                  <div><span class="capability-icon"><ClipboardList size={17} /></span><span><strong>剪贴板历史</strong><small>自动保存最近复制的文本、图片和文件。</small></span></div>
+                  <div><span class="capability-icon"><Search size={17} /></span><span><strong>快速查找</strong><small>按内容搜索，并按类型或收藏筛选记录。</small></span></div>
+                  <div><span class="capability-icon"><Star size={17} /></span><span><strong>收藏常用内容</strong><small>保留经常使用的片段，随时再次调用。</small></span></div>
+                  <div><span class="capability-icon"><Play size={17} /></span><span><strong>选择并粘贴</strong><small>使用 Alt + V 呼出，选中后粘贴回原输入框。</small></span></div>
+                </div>
+              {:else}
+                <div class="capability-list">
+                  {#each commands.filter((command) => command.plugin_id === activeDetail?.id) as command}
+                    <div><span class="capability-icon"><Play size={17} /></span><span><strong>{command.title}</strong><small>可在 VviTools 搜索中运行。</small></span></div>
+                  {:else}
+                    <div><span class="capability-icon"><Box size={17} /></span><span><strong>插件工具</strong><small>{activeDetail.description}</small></span></div>
+                  {/each}
+                </div>
+              {/if}
             </section>
-            <nav class="market-detail-tabs" aria-label="插件详情">
-              <button class="active" type="button">介绍</button>
-              <button type="button">权限</button>
-              <button type="button">更新记录</button>
-            </nav>
-            <section class="market-detail-previews" aria-label="插件预览">
-              <div class="plugin-preview-card primary-preview">
-                <span>{marketDetail.name}</span>
-                <strong>{marketDetail.categories.map(categoryLabel).join(" / ") || "VviTools 插件"}</strong>
-                <small>{marketDetail.description}</small>
-              </div>
-              <div class="plugin-preview-card secondary-preview">
-                <span>Runtime</span>
-                <strong>{marketDetail.runtime || "plugin"}</strong>
-                <small>{marketDetail.entry || "无需入口"}</small>
-              </div>
-            </section>
-            <section class="market-detail-content">
-              <h3>{marketDetail.name}</h3>
-              <p>{marketDetail.description}</p>
-              <h3>插件信息</h3>
-              <p>入口：{marketDetail.entry || "无"}</p>
-              <p>权限：{marketDetail.permissions.join("、") || "无"}</p>
-              <div class="feature-tags">
-                {#each marketDetail.categories as category}
-                  <button type="button">{categoryLabel(category)}</button>
+            <section class="market-detail-section permission-section">
+              <header>
+                <h3>权限</h3>
+                <p>仅在使用相关功能时调用。</p>
+              </header>
+              <div class="permission-list">
+                {#each activeDetail.permissions as permission}
+                  <span><ShieldCheck size={16} />{permissionLabel(permission)}</span>
+                {:else}
+                  <span><ShieldCheck size={16} />无需额外权限</span>
                 {/each}
               </div>
             </section>
           </article>
-        {:else}
+      {:else if view === "finder"}
         <div class="market-page">
           <div class="market-head">
             <div>
               <div class="view-title">{featureTitle()}</div>
-              <small>{query ? "搜索当前分类" : "当前标签下的插件"}</small>
+              <small>
+                {#if query}
+                  找到 {filteredMarket.length} 个结果
+                {:else if selectedPluginCategory === "explore"}
+                  发现适合你的工具
+                {:else if selectedPluginCategory === "developer"}
+                  面向开发工作的实用工具
+                {:else}
+                  管理从本地或远程导入的插件
+                {/if}
+              </small>
             </div>
             {#if selectedPluginCategory === "custom"}
               <div class="custom-actions">
                 <button class="import-button" on:click={openCustomImportDialog} type="button">
                   <DownloadCloud size={17} />
-                  导入配置文件
-                </button>
-                <button class="delete-button" on:click={deleteSelectedCustomPlugin} type="button">
-                  <Trash2 size={17} />
-                  删除插件
+                  导入插件
                 </button>
               </div>
             {/if}
@@ -1345,7 +1397,7 @@
                   <strong>{item.name}</strong>
                   <small>{item.description}</small>
                 </span>
-                <em>{item.bundled ? "内置" : item.runtime || "插件"}</em>
+                <em>{item.bundled ? "内置" : installedIds.has(item.id) ? "已安装" : "插件"}</em>
                 {#if isClipboardEntry(item) || installedIds.has(item.id)}
                   <Check size={18} />
                 {:else}
@@ -1354,149 +1406,174 @@
               </button>
             {/each}
             {#if filteredMarket.length === 0}
-              <div class="market-empty">{categoryEmptyText()}</div>
+              <div class="market-empty">
+                {#if selectedPluginCategory === "custom"}
+                  <PackageSearch size={28} />
+                {:else}
+                  <Box size={28} />
+                {/if}
+                <strong>{categoryEmptyText()}</strong>
+                <small>
+                  {selectedPluginCategory === "custom"
+                    ? "可导入 plugin.json，添加自己的 Node 或 Shell 工具。"
+                    : "新的工具会在这里出现。"}
+                </small>
+                {#if selectedPluginCategory === "custom"}
+                  <button class="import-button" on:click={openCustomImportDialog} type="button">
+                    <DownloadCloud size={16} />
+                    导入插件
+                  </button>
+                {/if}
+              </div>
             {/if}
           </div>
         </div>
-        {/if}
       {:else if view === "installed"}
-        <div class="view-title">已安装</div>
-        <div class="installed-layout">
-          <div class="installed-list">
-            {#each filteredPlugins as plugin}
+        <div class="market-page">
+          <div class="market-head">
+            <div>
+              <div class="view-title">已安装</div>
+              <small>{query ? `找到 ${installedMarket.length} 个结果` : `${installedMarket.length} 个插件，可直接打开使用`}</small>
+            </div>
+          </div>
+          <div class="market-plugin-grid">
+            {#each installedMarket as item}
               <button
-                class:active={pluginDetail?.id === plugin.id}
-                class="installed-item"
-                on:click={() => (selectedPluginId = plugin.id)}
+                class:active={installedDetail?.id === item.id}
+                class="market-plugin-card"
+                on:click={() => activateInstalledItem(item)}
                 type="button"
               >
-                <span class="plugin-icon">{initials(plugin.name)}</span>
-                <span>
-                  <strong>{plugin.name}</strong>
-                  <small>{plugin.description}</small>
+                <span class="plugin-icon large">
+                  {#if isClipboardEntry(item)}<ClipboardList size={24} />{:else}{initials(item.name)}{/if}
                 </span>
+                <span>
+                  <strong>{item.name}</strong>
+                  <small>{item.description}</small>
+                </span>
+                <em>{item.bundled ? "内置" : "已安装"}</em>
+                <Check size={18} />
               </button>
             {/each}
-          </div>
-          <article class="plugin-detail">
-            {#if pluginDetail}
-              <div class="detail-head">
-                <span class="plugin-icon large">{initials(pluginDetail.name)}</span>
-                <div>
-                  <h2>{pluginDetail.name}<em>{pluginDetail.version}</em></h2>
-                  <p>{pluginDetail.description}</p>
-                </div>
-              </div>
-              <div class="detail-meta">
-                <span>{pluginDetail.commands} 个命令</span>
-                <span>{pluginDetail.bundled ? "捆绑内置" : "本地安装"}</span>
-                <span>{pluginDetail.runtime} · {pluginDetail.entry}</span>
-                <span>权限 {pluginDetail.permissions.join("、") || "无"}</span>
-              </div>
-              <div class="feature-tags">
-                {#each commands.filter((command) => command.plugin_id === pluginDetail?.id) as command}
-                  <button on:click={() => run(command)} type="button"><Play size={13} />{command.keyword}</button>
-                {/each}
-              </div>
-            {:else}
-              <div class="empty-installed">
+            {#if installedMarket.length === 0}
+              <div class="market-empty">
                 <Box size={46} />
-                <strong>暂无任何插件</strong>
-                <button class="primary" on:click={() => (view = "finder")} type="button">去插件市场看看吧</button>
+                <strong>{query ? "没有匹配插件" : "还没有安装插件"}</strong>
+                <small>从探索页获取插件后，会统一显示在这里。</small>
+                {#if !query}
+                  <button class="import-button" on:click={() => openPluginCategory("explore")} type="button">
+                    <Star size={16} />
+                    去探索
+                  </button>
+                {/if}
               </div>
             {/if}
-          </article>
+          </div>
         </div>
       {:else}
-        <div class="view-title">设置</div>
+        <div class="page-heading settings-heading">
+          <div class="view-title">设置</div>
+          <small>调整 VviTools 的启动方式与快捷操作</small>
+        </div>
         <section class="settings-panel settings-page">
-          <Settings size={34} />
-          <h2>应用设置</h2>
-          <div class="settings-list">
-            <div class="settings-row">
-              <span>
-                <strong>开机启动</strong>
-                <small>登录系统后自动启动 VviTools，保留状态栏入口和快捷键。</small>
-              </span>
-              <button
-                class="settings-switch"
-                class:enabled={autostartEnabled}
-                disabled={autostartLoading}
-                aria-pressed={autostartEnabled}
-                on:click={toggleAutostart}
-                type="button"
-              >
-                {#if autostartLoading}
-                  <Loader2 class="spin" size={14} />
-                {:else}
-                  <span class="sr-only">{autostartEnabled ? "已开启" : "已关闭"}</span>
-                  <span class="settings-switch-thumb"></span>
-                {/if}
-              </button>
-            </div>
-            <div class="settings-row">
-              <span>
-                <strong>Dock 栏显示</strong>
-                <small>开启后在 Dock 中显示图标；关闭后仅保留状态栏入口和快捷键呼出。</small>
-              </span>
-              <button
-                class="settings-switch"
-                class:enabled={dockVisibleEnabled}
-                disabled={dockVisibleLoading}
-                aria-pressed={dockVisibleEnabled}
-                on:click={toggleDockVisible}
-                type="button"
-              >
-                {#if dockVisibleLoading}
-                  <Loader2 class="spin" size={14} />
-                {:else}
-                  <span class="sr-only">{dockVisibleEnabled ? "已开启" : "已关闭"}</span>
-                  <span class="settings-switch-thumb"></span>
-                {/if}
-              </button>
-            </div>
-            <div class="settings-row">
-              <span>
-                <strong>自动粘贴权限</strong>
-                <small>用于选择剪贴板记录后自动粘贴到原输入框。</small>
-              </span>
-              <div class="settings-actions">
-                <em class:enabled={accessibilityPermissionGranted}>
-                  {accessibilityPermissionGranted ? "已开启" : accessibilityPermissionSupported ? "未开启" : "无需授权"}
-                </em>
-                {#if !accessibilityPermissionGranted && accessibilityPermissionSupported}
-                  <button class="secondary" on:click={() => openAccessibilityDialog()} type="button">开启</button>
-                {/if}
+          <div class="settings-group">
+            <h2>启动与显示</h2>
+            <div class="settings-list">
+              <div class="settings-row">
+                <span>
+                  <strong>开机启动</strong>
+                  <small>登录系统后自动启动 VviTools，保留状态栏入口和快捷键。</small>
+                </span>
+                <button
+                  class="settings-switch"
+                  class:enabled={autostartEnabled}
+                  disabled={autostartLoading}
+                  aria-pressed={autostartEnabled}
+                  on:click={toggleAutostart}
+                  type="button"
+                >
+                  {#if autostartLoading}
+                    <Loader2 class="spin" size={14} />
+                  {:else}
+                    <span class="sr-only">{autostartEnabled ? "已开启" : "已关闭"}</span>
+                    <span class="settings-switch-thumb"></span>
+                  {/if}
+                </button>
               </div>
-            </div>
-            <div class="settings-row">
-              <span>
-                <strong>全局快捷键</strong>
-                <small>使用 Alt + Space 显示或隐藏搜索，Alt + V 从底部打开剪贴板。</small>
-              </span>
-              <em>Alt Space / Alt V</em>
-            </div>
-            <div class="settings-row">
-              <span>
-                <strong>检查更新</strong>
-                <small>{updateStatus || "检查 GitHub Releases 中是否有新版本。"}</small>
-              </span>
-              <div class="settings-actions">
-                {#if updateReleaseUrl}
-                  <button class="secondary" on:click={openUpdateRelease} type="button">发布页</button>
-                {/if}
-                <button class="secondary" disabled={updateLoading} on:click={checkUpdate} type="button">
-                  {#if updateLoading}<Loader2 class="spin" size={14} />{/if}
-                  检查
+              <div class="settings-row">
+                <span>
+                  <strong>Dock 栏显示</strong>
+                  <small>开启后在 Dock 中显示图标；关闭后仅保留状态栏入口和快捷键呼出。</small>
+                </span>
+                <button
+                  class="settings-switch"
+                  class:enabled={dockVisibleEnabled}
+                  disabled={dockVisibleLoading}
+                  aria-pressed={dockVisibleEnabled}
+                  on:click={toggleDockVisible}
+                  type="button"
+                >
+                  {#if dockVisibleLoading}
+                    <Loader2 class="spin" size={14} />
+                  {:else}
+                    <span class="sr-only">{dockVisibleEnabled ? "已开启" : "已关闭"}</span>
+                    <span class="settings-switch-thumb"></span>
+                  {/if}
                 </button>
               </div>
             </div>
-            <div class="settings-row">
-              <span>
-                <strong>点击外部关闭</strong>
-                <small>窗口失去焦点后自动隐藏。</small>
-              </span>
-              <em>已开启</em>
+          </div>
+          <div class="settings-group">
+            <h2>快捷操作</h2>
+            <div class="settings-list">
+              <div class="settings-row">
+                <span>
+                  <strong>自动粘贴权限</strong>
+                  <small>用于选择剪贴板记录后自动粘贴到原输入框。</small>
+                </span>
+                <div class="settings-actions">
+                  <em class:enabled={accessibilityPermissionGranted}>
+                    {accessibilityPermissionGranted ? "已开启" : accessibilityPermissionSupported ? "未开启" : "无需授权"}
+                  </em>
+                  {#if !accessibilityPermissionGranted && accessibilityPermissionSupported}
+                    <button class="secondary" on:click={() => openAccessibilityDialog()} type="button">开启</button>
+                  {/if}
+                </div>
+              </div>
+              <div class="settings-row">
+                <span>
+                  <strong>全局快捷键</strong>
+                  <small>使用 Alt + Space 显示或隐藏搜索，Alt + V 从底部打开剪贴板。</small>
+                </span>
+                <em>Alt Space / Alt V</em>
+              </div>
+            </div>
+          </div>
+          <div class="settings-group">
+            <h2>应用</h2>
+            <div class="settings-list">
+              <div class="settings-row">
+                <span>
+                  <strong>检查更新</strong>
+                  <small>{updateStatus || "检查 GitHub Releases 中是否有新版本。"}</small>
+                </span>
+                <div class="settings-actions">
+                  {#if updateReleaseUrl}
+                    <button class="secondary" on:click={openUpdateRelease} type="button">发布页</button>
+                  {/if}
+                  <button class="secondary" disabled={updateLoading} on:click={checkUpdate} type="button">
+                    {#if updateLoading}<Loader2 class="spin" size={14} />{/if}
+                    检查
+                  </button>
+                </div>
+              </div>
+              <div class="settings-row">
+                <span>
+                  <strong>点击外部关闭</strong>
+                  <small>窗口失去焦点后自动隐藏。</small>
+                </span>
+                <em>已开启</em>
+              </div>
             </div>
           </div>
         </section>

@@ -4,6 +4,75 @@
 
 ---
 
+## [LRN-20260914-006] installed-plugin-view
+
+**Logged**: 2026-09-14T12:45:00+08:00
+**Priority**: high
+**Status**: done
+**Area**: frontend
+
+### Summary
+VviTools 的已安装页应与探索、开发、自定义共用插件卡片和详情样式。
+
+### Details
+为已安装插件单独使用左侧列表加右侧详情的双栏管理界面，会破坏插件中心的一致性，并在插件数量少时产生大片无意义空白。已安装只是插件集合的一种筛选状态，不应拥有另一套浏览结构。
+
+### Suggested Action
+插件中心的集合页统一复用同一套卡片网格；点击任意来源的插件后进入同一详情组件，仅根据安装状态调整操作按钮和状态标签。
+
+### Metadata
+- Source: user_feedback
+- Related Files: src/App.svelte, src/style.css
+- Tags: ui, installed-plugins, consistency, plugin-market
+
+---
+
+## [LRN-20260914-005] plugin-center-ui
+
+**Logged**: 2026-09-14T12:20:00+08:00
+**Priority**: high
+**Status**: done
+**Area**: frontend
+
+### Summary
+VviTools 插件中心应采用紧凑、扁平的工具型界面，不展示面向开发者的插件协议字段。
+
+### Details
+用户认为大侧栏、大标题、装饰性预览卡和卡片套卡片的设置页过于笨重。插件列表应保持可扫描的紧凑尺寸，详情页只展示用户能理解的功能、版本、安装来源和权限用途；runtime、entry、原始权限 ID 等内部信息不应出现在普通用户页面。空状态需要提供与当前页面相关的有效操作。
+
+### Suggested Action
+后续插件中心 UI 调整继续沿用小尺寸、低饱和、弱阴影和分隔线分组；新增 manifest 字段时默认只用于内部逻辑，除非能转译为明确的用户价值。
+
+### Metadata
+- Source: user_feedback
+- Related Files: src/App.svelte, src/style.css
+- Tags: ui, plugin-market, settings, information-architecture
+
+---
+
+## [LRN-20260914-004] plugin-navigation
+
+**Logged**: 2026-09-14T11:30:00+08:00
+**Priority**: high
+**Status**: done
+**Area**: frontend
+
+### Summary
+VviTools 插件市场左侧上方分类只保留探索、开发、自定义。
+
+### Details
+效率、搜索工具、图像、系统等底层分类不再作为一级菜单展示，避免工具箱菜单过长、层级过细。探索展示全部市场插件，开发筛选开发类插件，自定义展示用户导入插件；已安装和设置继续作为底部独立入口。
+
+### Suggested Action
+后续新增插件分类时优先作为插件元数据和详情标签使用，不直接扩展一级菜单，除非形成稳定且高频的独立使用场景。
+
+### Metadata
+- Source: user_feedback
+- Related Files: src/App.svelte
+- Tags: navigation, plugin-market, categories
+
+---
+
 ## [LRN-20260914-003] clipboard-feedback
 
 **Logged**: 2026-09-14T11:14:36+08:00

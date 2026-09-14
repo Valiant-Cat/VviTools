@@ -4,6 +4,52 @@
 
 ---
 
+## [ERR-20260914-004] plugin-detail-open
+
+**Logged**: 2026-09-14T12:55:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+主窗口插件详情的“打开”按钮错误复用了独立剪贴板窗口的内部初始化函数。
+
+### Details
+`openClipboardPanel()` 只负责在剪贴板 WebView 收到打开事件后初始化页面状态。主窗口直接调用它会把 `view` 改成 `clipboard`，但主窗口模板没有对应分支，因此落入默认的设置页分支。正确行为是调用 Tauri 命令 `open_clipboard_window`，显示独立剪贴板窗口。
+
+### Suggested Action
+区分“请求宿主打开插件窗口”和“插件窗口收到事件后初始化内容”两个动作；主窗口、搜索命令等外部入口统一调用宿主命令。
+
+### Metadata
+- Source: user_feedback
+- Related Files: src/App.svelte, src-tauri/src/commands.rs
+- Tags: plugin-detail, clipboard, routing, window
+
+---
+
+## [ERR-20260914-003] osascript-key-event
+
+**Logged**: 2026-09-14T11:44:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+使用 System Events 发送全局快捷键被 macOS 辅助功能策略拒绝。
+
+### Details
+为了唤出隐藏的 VviTools 主窗口进行截图验收，尝试通过 osascript 发送 Option + Space，系统返回“不允许发送按键”。应用构建和运行未受影响。
+
+### Suggested Action
+工具型应用的 UI 验收优先使用应用可访问性接口；不要依赖 System Events 模拟快捷键。
+
+### Metadata
+- Source: error
+- Related Files: none
+- Tags: macos, ui-test, accessibility
+
+---
+
 ## [ERR-20260914-001] exec_command
 
 **Logged**: 2026-09-14T10:48:59+08:00
