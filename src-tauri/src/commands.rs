@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
     sync::{Mutex, OnceLock},
     thread,
@@ -9,7 +9,7 @@ use std::{
 };
 
 use arboard::ImageData;
-use chrono::Utc;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use image::{ImageBuffer, RgbaImage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -135,7 +135,7 @@ enum CustomPluginConfig {
     Object { plugins: Vec<PluginManifest> },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClipboardItem {
     pub id: String,
     pub kind: String,
@@ -175,7 +175,43 @@ pub struct ClipboardPasteResult {
     pub message: String,
 }
 
-const CLIPBOARD_HISTORY_LIMIT: usize = 200;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClipboardSettings {
+    #[serde(default = "default_clipboard_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub retention_days: u32,
+    #[serde(default = "default_clipboard_max_items")]
+    pub max_items: usize,
+    #[serde(default = "default_clipboard_capture")]
+    pub capture_text: bool,
+    #[serde(default = "default_clipboard_capture")]
+    pub capture_images: bool,
+    #[serde(default = "default_clipboard_capture")]
+    pub capture_files: bool,
+}
+
+impl Default for ClipboardSettings {
+    fn default() -> Self {
+        Self {
+            enabled: default_clipboard_enabled(),
+            retention_days: 0,
+            max_items: default_clipboard_max_items(),
+            capture_text: default_clipboard_capture(),
+            capture_images: default_clipboard_capture(),
+            capture_files: default_clipboard_capture(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ClipboardStorageInfo {
+    pub directory: String,
+    pub total_bytes: u64,
+    pub item_count: usize,
+    pub image_count: usize,
+}
+
 const CLIPBOARD_PREVIEW_LIMIT: usize = 160;
 const APP_BUNDLE_ID: &str = "dev.vvicat.vvitools";
 
@@ -279,7 +315,41 @@ pub fn execute_plugin_action(app: tauri::AppHandle, request: ActionRequest) -> R
 
 #[tauri::command]
 pub fn list_clipboard_history() -> Result<Vec<ClipboardItem>, String> {
-    load_clipboard_history().map_err(to_message)
+    cleanup_clipboard_history().map_err(to_message)
+}
+
+#[tauri::command]
+pub fn get_clipboard_settings() -> Result<ClipboardSettings, String> {
+    load_clipboard_settings().map_err(to_message)
+}
+
+#[tauri::command]
+pub fn set_clipboard_settings(settings: ClipboardSettings) -> Result<ClipboardSettings, String> {
+    let settings = normalize_clipboard_settings(settings);
+    save_clipboard_settings(&settings).map_err(to_message)?;
+    cleanup_clipboard_history_with_settings(&settings).map_err(to_message)?;
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn get_clipboard_storage_info() -> Result<ClipboardStorageInfo, String> {
+    let history = cleanup_clipboard_history().map_err(to_message)?;
+    let directory = clipboard_data_dir();
+    let total_bytes = directory_size(&directory).map_err(to_message)?;
+    let image_count = history.iter().filter(|item| item.kind == "image").count();
+    Ok(ClipboardStorageInfo {
+        directory: directory.to_string_lossy().into_owned(),
+        total_bytes,
+        item_count: history.len(),
+        image_count,
+    })
+}
+
+#[tauri::command]
+pub fn open_clipboard_storage_location() -> Result<(), String> {
+    let directory = clipboard_data_dir();
+    fs::create_dir_all(&directory).map_err(to_message)?;
+    open::that(directory).map_err(to_message)
 }
 
 #[tauri::command]
@@ -574,10 +644,15 @@ pub fn start_clipboard_watcher() {
         let mut last_image_id = String::new();
         let mut last_file_id = String::new();
         loop {
+            let settings = load_clipboard_settings().unwrap_or_default();
+            if !settings.enabled {
+                thread::sleep(Duration::from_millis(900));
+                continue;
+            }
             if let Ok(file_paths) = read_files_from_clipboard() {
                 if !file_paths.is_empty() {
                     let file_id = clipboard_files_id(&file_paths);
-                    if file_id != last_file_id {
+                    if settings.capture_files && file_id != last_file_id {
                         let _ = record_clipboard_files(file_paths, file_id.clone());
                         last_file_id = file_id;
                     }
@@ -585,18 +660,22 @@ pub fn start_clipboard_watcher() {
                     continue;
                 }
             }
-            if let Ok(text) = read_text_from_clipboard() {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() && text != last_text {
-                    let _ = record_clipboard_text(&text);
-                    last_text = text;
+            if settings.capture_text {
+                if let Ok(text) = read_text_from_clipboard() {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() && text != last_text {
+                        let _ = record_clipboard_text(&text);
+                        last_text = text;
+                    }
                 }
             }
-            if let Ok(image) = read_image_from_clipboard() {
-                let image_id = clipboard_image_id(&image);
-                if image_id != last_image_id {
-                    let _ = record_clipboard_image(image, image_id.clone());
-                    last_image_id = image_id;
+            if settings.capture_images {
+                if let Ok(image) = read_image_from_clipboard() {
+                    let image_id = clipboard_image_id(&image);
+                    if image_id != last_image_id {
+                        let _ = record_clipboard_image(image, image_id.clone());
+                        last_image_id = image_id;
+                    }
                 }
             }
             thread::sleep(Duration::from_millis(900));
@@ -901,6 +980,10 @@ fn write_image_to_clipboard(item: &ClipboardItem) -> Result<(), String> {
 }
 
 fn record_clipboard_text(text: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let settings = load_clipboard_settings()?;
+    if !settings.enabled || !settings.capture_text {
+        return Ok(());
+    }
     let mut history = load_clipboard_history()?;
     let id = clipboard_item_id(text);
     history.retain(|item| item.id != id);
@@ -919,14 +1002,17 @@ fn record_clipboard_text(text: &str) -> Result<(), Box<dyn std::error::Error>> {
             file_paths: Vec::new(),
         },
     );
-    history.truncate(CLIPBOARD_HISTORY_LIMIT);
-    save_clipboard_history(&history)
+    save_cleaned_clipboard_history(history, &settings)
 }
 
 fn record_clipboard_image(
     image: ImageData<'static>,
     id: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let settings = load_clipboard_settings()?;
+    if !settings.enabled || !settings.capture_images {
+        return Ok(());
+    }
     let image_path = save_clipboard_image(&id, image.width, image.height, image.bytes.as_ref())?;
     let mut history = load_clipboard_history()?;
     history.retain(|item| item.id != id);
@@ -945,26 +1031,32 @@ fn record_clipboard_image(
             file_paths: Vec::new(),
         },
     );
-    history.truncate(CLIPBOARD_HISTORY_LIMIT);
-    save_clipboard_history(&history)
+    save_cleaned_clipboard_history(history, &settings)
 }
 
 fn record_clipboard_image_from_path(
     item: &ClipboardItem,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let settings = load_clipboard_settings()?;
+    if !settings.enabled || !settings.capture_images {
+        return Ok(());
+    }
     let mut history = load_clipboard_history()?;
     history.retain(|entry| entry.id != item.id);
     let mut restored = item.clone();
     restored.copied_at = Utc::now().to_rfc3339();
     history.insert(0, restored);
-    history.truncate(CLIPBOARD_HISTORY_LIMIT);
-    save_clipboard_history(&history)
+    save_cleaned_clipboard_history(history, &settings)
 }
 
 fn record_clipboard_files(
     file_paths: Vec<String>,
     id: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let settings = load_clipboard_settings()?;
+    if !settings.enabled || !settings.capture_files {
+        return Ok(());
+    }
     let mut history = load_clipboard_history()?;
     history.retain(|item| item.id != id);
     let preview = clipboard_files_preview(&file_paths);
@@ -983,20 +1075,22 @@ fn record_clipboard_files(
             file_paths,
         },
     );
-    history.truncate(CLIPBOARD_HISTORY_LIMIT);
-    save_clipboard_history(&history)
+    save_cleaned_clipboard_history(history, &settings)
 }
 
 fn record_clipboard_files_from_item(
     item: &ClipboardItem,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let settings = load_clipboard_settings()?;
+    if !settings.enabled || !settings.capture_files {
+        return Ok(());
+    }
     let mut history = load_clipboard_history()?;
     history.retain(|entry| entry.id != item.id);
     let mut restored = item.clone();
     restored.copied_at = Utc::now().to_rfc3339();
     history.insert(0, restored);
-    history.truncate(CLIPBOARD_HISTORY_LIMIT);
-    save_clipboard_history(&history)
+    save_cleaned_clipboard_history(history, &settings)
 }
 
 fn write_files_to_clipboard(item: &ClipboardItem) -> Result<(), String> {
@@ -1065,12 +1159,137 @@ fn save_clipboard_history(items: &[ClipboardItem]) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
+fn save_cleaned_clipboard_history(
+    history: Vec<ClipboardItem>,
+    settings: &ClipboardSettings,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cleaned = prune_clipboard_history(history.clone(), settings, Utc::now());
+    remove_discarded_clipboard_images(&history, &cleaned);
+    save_clipboard_history(&cleaned)
+}
+
+fn cleanup_clipboard_history() -> Result<Vec<ClipboardItem>, Box<dyn std::error::Error>> {
+    let settings = load_clipboard_settings()?;
+    cleanup_clipboard_history_with_settings(&settings)
+}
+
+fn cleanup_clipboard_history_with_settings(
+    settings: &ClipboardSettings,
+) -> Result<Vec<ClipboardItem>, Box<dyn std::error::Error>> {
+    let history = load_clipboard_history()?;
+    let cleaned = prune_clipboard_history(history.clone(), settings, Utc::now());
+    if cleaned != history {
+        remove_discarded_clipboard_images(&history, &cleaned);
+        save_clipboard_history(&cleaned)?;
+    }
+    Ok(cleaned)
+}
+
+fn prune_clipboard_history(
+    history: Vec<ClipboardItem>,
+    settings: &ClipboardSettings,
+    now: DateTime<Utc>,
+) -> Vec<ClipboardItem> {
+    let cutoff = (settings.retention_days > 0)
+        .then(|| now - ChronoDuration::days(i64::from(settings.retention_days)));
+    let filtered = history
+        .into_iter()
+        .filter(|item| {
+            if item.favorite {
+                return true;
+            }
+            cutoff.map_or(true, |minimum| {
+                DateTime::parse_from_rfc3339(&item.copied_at)
+                    .map(|copied_at| copied_at.with_timezone(&Utc) >= minimum)
+                    .unwrap_or(true)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if filtered.len() <= settings.max_items {
+        return filtered;
+    }
+
+    let mut keep = vec![false; filtered.len()];
+    let mut kept = 0;
+    for (index, item) in filtered.iter().enumerate() {
+        if item.favorite && kept < settings.max_items {
+            keep[index] = true;
+            kept += 1;
+        }
+    }
+    for (index, item) in filtered.iter().enumerate() {
+        if !item.favorite && kept < settings.max_items {
+            keep[index] = true;
+            kept += 1;
+        }
+    }
+
+    filtered
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, item)| keep[index].then_some(item))
+        .collect()
+}
+
+fn remove_discarded_clipboard_images(original: &[ClipboardItem], retained: &[ClipboardItem]) {
+    for item in original {
+        if item.kind == "image"
+            && !item.image_path.is_empty()
+            && !retained
+                .iter()
+                .any(|retained_item| retained_item.image_path == item.image_path)
+        {
+            let _ = fs::remove_file(&item.image_path);
+        }
+    }
+}
+
 fn clipboard_history_path() -> PathBuf {
+    clipboard_data_dir().join("history.json")
+}
+
+fn load_clipboard_settings() -> Result<ClipboardSettings, Box<dyn std::error::Error>> {
+    let path = clipboard_settings_path();
+    if !path.exists() {
+        return Ok(ClipboardSettings::default());
+    }
+    let data = fs::read(path)?;
+    Ok(normalize_clipboard_settings(serde_json::from_slice(&data)?))
+}
+
+fn save_clipboard_settings(settings: &ClipboardSettings) -> Result<(), Box<dyn std::error::Error>> {
+    let path = clipboard_settings_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_vec_pretty(settings)?)?;
+    Ok(())
+}
+
+fn clipboard_settings_path() -> PathBuf {
+    clipboard_data_dir().join("settings.json")
+}
+
+fn clipboard_data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("VviTools")
         .join("clipboard")
-        .join("history.json")
+}
+
+fn directory_size(path: &Path) -> Result<u64, Box<dyn std::error::Error>> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let mut total = 0;
+    for entry in walkdir::WalkDir::new(path) {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            total += entry.metadata()?.len();
+        }
+    }
+    Ok(total)
 }
 
 pub fn load_dock_visible_setting() -> bool {
@@ -1129,6 +1348,24 @@ fn default_dock_visible() -> bool {
     false
 }
 
+fn default_clipboard_enabled() -> bool {
+    true
+}
+
+fn default_clipboard_max_items() -> usize {
+    200
+}
+
+fn default_clipboard_capture() -> bool {
+    true
+}
+
+fn normalize_clipboard_settings(mut settings: ClipboardSettings) -> ClipboardSettings {
+    settings.retention_days = settings.retention_days.min(3650);
+    settings.max_items = settings.max_items.clamp(10, 5000);
+    settings
+}
+
 fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches('v').to_string()
 }
@@ -1155,11 +1392,7 @@ fn version_parts(version: &str) -> Vec<u64> {
 }
 
 fn clipboard_images_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("VviTools")
-        .join("clipboard")
-        .join("images")
+    clipboard_data_dir().join("images")
 }
 
 fn clipboard_item_id(text: &str) -> String {
@@ -1234,3 +1467,83 @@ trait Pipe: Sized {
 }
 
 impl<T> Pipe for T {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn clipboard_item(id: &str, copied_at: DateTime<Utc>, favorite: bool) -> ClipboardItem {
+        ClipboardItem {
+            id: id.into(),
+            kind: "text".into(),
+            text: id.into(),
+            preview: id.into(),
+            copied_at: copied_at.to_rfc3339(),
+            favorite,
+            image_path: String::new(),
+            width: 0,
+            height: 0,
+            file_paths: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn clipboard_retention_keeps_favorites() {
+        let now = Utc::now();
+        let settings = ClipboardSettings {
+            retention_days: 7,
+            ..ClipboardSettings::default()
+        };
+        let history = vec![
+            clipboard_item("recent", now - ChronoDuration::days(2), false),
+            clipboard_item("expired", now - ChronoDuration::days(12), false),
+            clipboard_item("favorite", now - ChronoDuration::days(30), true),
+        ];
+
+        let cleaned = prune_clipboard_history(history, &settings, now);
+
+        assert_eq!(
+            cleaned
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["recent", "favorite"]
+        );
+    }
+
+    #[test]
+    fn clipboard_capacity_prioritizes_favorites_without_reordering() {
+        let now = Utc::now();
+        let settings = ClipboardSettings {
+            max_items: 2,
+            ..ClipboardSettings::default()
+        };
+        let history = vec![
+            clipboard_item("newest", now, false),
+            clipboard_item("favorite", now - ChronoDuration::minutes(1), true),
+            clipboard_item("older", now - ChronoDuration::minutes(2), false),
+        ];
+
+        let cleaned = prune_clipboard_history(history, &settings, now);
+
+        assert_eq!(
+            cleaned
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["newest", "favorite"]
+        );
+    }
+
+    #[test]
+    fn clipboard_settings_are_bounded() {
+        let settings = normalize_clipboard_settings(ClipboardSettings {
+            retention_days: u32::MAX,
+            max_items: 0,
+            ..ClipboardSettings::default()
+        });
+
+        assert_eq!(settings.retention_days, 3650);
+        assert_eq!(settings.max_items, 10);
+    }
+}

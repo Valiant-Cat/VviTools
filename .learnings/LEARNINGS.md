@@ -4,6 +4,75 @@
 
 ---
 
+## [LRN-20260914-008] frontend
+
+**Logged**: 2026-09-14T16:45:00+08:00
+**Priority**: medium
+**Status**: done
+**Area**: frontend
+
+### Summary
+VviTools 应用详情页的返回入口采用 App Store 风格的圆形纯图标按钮。
+
+### Details
+用户明确要求详情页返回按钮去掉文字，使用左箭头和圆形浅色背景，提升详情页的简洁度与平台一致性。该样式只用于应用详情层，剪贴板设置等需要表达返回目标的子页面继续保留文字。
+
+### Suggested Action
+后续详情型页面优先复用圆形返回图标；设置流程或返回目标不明显时保留文字说明。
+
+### Metadata
+- Source: user_feedback
+- Related Files: src/App.svelte, src/style.css
+- Tags: app-detail, navigation, macos
+
+---
+
+## [LRN-20260914-009] frontend
+
+**Logged**: 2026-09-14T17:00:00+08:00
+**Priority**: medium
+**Status**: done
+**Area**: frontend
+
+### Summary
+侧边栏全局入口与详情页局部返回不应同时使用相同的左箭头。
+
+### Details
+左侧“返回搜索”和详情页“返回列表”同时显示箭头，会让不同导航层级看起来重复。侧边栏顶部应使用应用标识和 VviTools 名称表达全局主页入口，详情内容区则保留圆形返回箭头表达局部层级返回。
+
+### Suggested Action
+全局导航入口优先使用品牌或主页语义；仅在内容层级返回时使用返回箭头。
+
+### Metadata
+- Source: user_feedback
+- Related Files: src/App.svelte, src/style.css
+- Tags: sidebar, navigation, hierarchy
+
+---
+
+## [LRN-20260914-007] plugin-detail-actions
+
+**Logged**: 2026-09-14T14:30:00+08:00
+**Priority**: high
+**Status**: done
+**Area**: frontend
+
+### Summary
+插件详情中的设置应使用轻量图标操作，应用描述应独立位于应用头部信息下方。
+
+### Details
+将“设置”做成与主操作同规格的文字边框按钮，会和“打开”争夺视觉层级。应用描述夹在名称和元数据之间也会让头部横向拥挤。详情头部应只突出名称、状态、元数据和主操作，描述放到图标所在首行下方并横向展开。
+
+### Suggested Action
+插件详情只保留一个明确的主按钮；设置等熟悉的次级操作使用带悬停提示的图标按钮，并紧跟在应用名右侧。捆绑插件不展示“内置”标签。描述作为独立信息行，从图标左边界开始对齐。
+
+### Metadata
+- Source: user_feedback
+- Related Files: src/App.svelte, src/style.css
+- Tags: plugin-detail, hierarchy, actions, description
+
+---
+
 ## [LRN-20260914-006] installed-plugin-view
 
 **Logged**: 2026-09-14T12:45:00+08:00

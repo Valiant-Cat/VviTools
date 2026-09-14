@@ -4,6 +4,52 @@
 
 ---
 
+## [FR-20260914-003] 主面板 Esc 分层返回
+
+**Logged**: 2026-09-14T16:30:00+08:00
+**Priority**: medium
+**Status**: implemented
+**Area**: frontend
+
+### Summary
+主窗口在任意焦点位置支持按 Esc 按当前界面层级返回。
+
+### Details
+此前 Esc 仅绑定在搜索输入框，焦点位于插件卡片、操作按钮或设置控件时无法返回。现在由窗口级键盘事件统一处理，并依次关闭弹窗或确认状态、从剪贴板设置返回插件详情、从插件详情返回列表、从功能页返回搜索面板。
+
+### Suggested Action
+后续增加主窗口内的模态层或子页面时，应同步纳入 Esc 返回层级，并继续保持独立剪贴板窗口按 Esc 直接关闭。
+
+### Metadata
+- Source: conversation
+- Related Files: src/App.svelte
+- Tags: keyboard, escape, navigation
+
+---
+
+## [FR-20260914-002] 系统剪贴板独立设置
+
+**Logged**: 2026-09-14T14:00:00+08:00
+**Priority**: high
+**Status**: implemented
+**Area**: backend | frontend
+
+### Summary
+为系统剪贴板提供记录范围、保留策略和本地存储管理。
+
+### Details
+剪贴板此前固定记录文本、图片和文件，最多保留 200 条，用户无法暂停记录、控制保留时间、查看存储位置或占用。
+
+### Suggested Action
+剪贴板设置独立保存，并让记录总开关、类型开关、保留时长、历史容量、存储位置、占用统计和清空历史都对应真实宿主行为。
+
+### Metadata
+- Source: conversation
+- Related Files: src/App.svelte, src/style.css, src-tauri/src/commands.rs
+- Tags: clipboard, settings, retention, storage
+
+---
+
 ## [FR-20260914-001] 本地构建后安装到 Applications
 
 **Logged**: 2026-09-14T10:38:56+08:00

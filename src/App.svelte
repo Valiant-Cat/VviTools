@@ -10,6 +10,7 @@
     ClipboardList,
     Copy,
     DownloadCloud,
+    FolderOpen,
     Heart,
     Loader2,
     PackageSearch,
@@ -107,9 +108,32 @@
     message: string;
   };
 
+  type ClipboardSettings = {
+    enabled: boolean;
+    retention_days: number;
+    max_items: number;
+    capture_text: boolean;
+    capture_images: boolean;
+    capture_files: boolean;
+  };
+
+  type ClipboardStorageInfo = {
+    directory: string;
+    total_bytes: number;
+    item_count: number;
+    image_count: number;
+  };
+
   type ClipboardFilter = "all" | "text" | "image" | "file" | "favorite";
 
-  type View = "launcher" | "finder" | "clipboard" | "installed" | "settings" | "permission";
+  type View =
+    | "launcher"
+    | "finder"
+    | "clipboard"
+    | "clipboard-settings"
+    | "installed"
+    | "settings"
+    | "permission";
   type PluginCategoryKey = "efficiency" | "search" | "image" | "developer" | "system";
   type PluginCategory = "explore" | "developer" | "custom";
 
@@ -154,6 +178,23 @@
   let autostartLoading = false;
   let dockVisibleEnabled = false;
   let dockVisibleLoading = false;
+  let clipboardSettings: ClipboardSettings = {
+    enabled: true,
+    retention_days: 0,
+    max_items: 200,
+    capture_text: true,
+    capture_images: true,
+    capture_files: true,
+  };
+  let clipboardStorageInfo: ClipboardStorageInfo = {
+    directory: "",
+    total_bytes: 0,
+    item_count: 0,
+    image_count: 0,
+  };
+  let clipboardSettingsLoading = false;
+  let clipboardClearConfirm = false;
+  let clipboardSettingsReturnView: "finder" | "installed" = "installed";
   let accessibilityPermissionGranted = false;
   let accessibilityPermissionSupported = false;
   let accessibilityPermissionLoading = false;
@@ -432,6 +473,25 @@
     marketDetailOpen = false;
   }
 
+  async function openClipboardSettings() {
+    clipboardSettingsReturnView = view === "finder" ? "finder" : "installed";
+    view = "clipboard-settings";
+    marketDetailOpen = false;
+    query = "";
+    error = "";
+    clipboardClearConfirm = false;
+    await Promise.all([loadClipboardSettings(), loadClipboardStorageInfo()]);
+    await tick();
+    resetViewport();
+  }
+
+  async function backToClipboardDetail() {
+    view = clipboardSettingsReturnView;
+    marketDetailOpen = true;
+    await tick();
+    resetViewport();
+  }
+
   async function openFeature(nextView: View = "finder") {
     view = nextView;
     query = "";
@@ -600,6 +660,60 @@
     }
   }
 
+  async function loadClipboardSettings() {
+    try {
+      clipboardSettings = await invoke<ClipboardSettings>("get_clipboard_settings");
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
+  async function loadClipboardStorageInfo() {
+    try {
+      clipboardStorageInfo = await invoke<ClipboardStorageInfo>("get_clipboard_storage_info");
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
+  async function updateClipboardSettings(patch: Partial<ClipboardSettings>) {
+    if (clipboardSettingsLoading) return;
+    clipboardSettingsLoading = true;
+    error = "";
+    const previous = clipboardSettings;
+    clipboardSettings = { ...clipboardSettings, ...patch };
+    try {
+      clipboardSettings = await invoke<ClipboardSettings>("set_clipboard_settings", {
+        settings: clipboardSettings,
+      });
+      await Promise.all([loadClipboardHistory(), loadClipboardStorageInfo()]);
+    } catch (err) {
+      clipboardSettings = previous;
+      error = String(err);
+    } finally {
+      clipboardSettingsLoading = false;
+    }
+  }
+
+  function changeClipboardRetention(event: Event) {
+    const retentionDays = Number((event.currentTarget as HTMLSelectElement).value);
+    void updateClipboardSettings({ retention_days: retentionDays });
+  }
+
+  function changeClipboardMaxItems(event: Event) {
+    const maxItems = Number((event.currentTarget as HTMLSelectElement).value);
+    void updateClipboardSettings({ max_items: maxItems });
+  }
+
+  async function openClipboardStorageLocation() {
+    error = "";
+    try {
+      await invoke("open_clipboard_storage_location");
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
   async function copyClipboardItem(item: ClipboardItem, closeAfterCopy = false) {
     error = "";
     clipboardStatus = "";
@@ -644,16 +758,23 @@
   }
 
   async function clearClipboardHistory() {
-    if (!clipboardItems.length) return;
-    const approved = window.confirm("清空全部剪贴板历史？");
-    if (!approved) return;
+    if (!clipboardStorageInfo.item_count || clipboardSettingsLoading) return;
+    if (!clipboardClearConfirm) {
+      clipboardClearConfirm = true;
+      return;
+    }
+    clipboardSettingsLoading = true;
     error = "";
     clipboardStatus = "";
     try {
       await invoke("clear_clipboard_history");
       await loadClipboardHistory();
+      await loadClipboardStorageInfo();
+      clipboardClearConfirm = false;
     } catch (err) {
       error = String(err);
+    } finally {
+      clipboardSettingsLoading = false;
     }
   }
 
@@ -750,14 +871,32 @@
       await activateSelected();
     } else if (event.key === "Escape") {
       event.preventDefault();
-      if (isClipboardWindow) await hideCurrentWindow();
-      else if (view === "launcher" && !result && !error) await hideLauncher();
-      else if (view === "launcher") {
+      if (showCustomImportDialog) {
+        closeCustomImportDialog();
+      } else if (showAccessibilityDialog) {
+        await closeAccessibilityDialog();
+      } else if (clipboardClearConfirm) {
+        clipboardClearConfirm = false;
+      } else if (isClipboardWindow) {
+        await hideCurrentWindow();
+      } else if (view === "launcher" && !result && !error) {
+        await hideLauncher();
+      } else if (view === "launcher") {
         result = null;
         error = "";
+      } else if (view === "clipboard-settings") {
+        await backToClipboardDetail();
+      } else if ((view === "finder" || view === "installed") && marketDetailOpen) {
+        closeMarketDetail();
       } else {
         await backToLauncher();
       }
+    }
+  }
+
+  function handleGlobalKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape" && !event.defaultPrevented) {
+      void handleKeydown(event);
     }
   }
 
@@ -919,8 +1058,21 @@
   function featureTitle() {
     if (view === "installed") return "已安装";
     if (view === "settings") return "设置";
+    if (view === "clipboard-settings") return "剪贴板设置";
     if (view === "clipboard") return "剪贴板";
     return selectedCategoryLabel;
+  }
+
+  function formatBytes(value: number) {
+    if (value < 1024) return `${value} B`;
+    const units = ["KB", "MB", "GB"];
+    let size = value / 1024;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
   }
 
   refreshAll();
@@ -929,6 +1081,7 @@
   window.addEventListener("vvitools-open-settings", handleOpenSettings);
   window.addEventListener("vvitools-open-clipboard", handleOpenClipboard);
   window.addEventListener("vvitools-open-accessibility-permission", handleOpenAccessibilityPermission);
+  window.addEventListener("keydown", handleGlobalKeydown);
   listen("show-launcher", handleShowLauncher)
     .then((unlisten) => {
       unlistenShowLauncher = unlisten;
@@ -962,6 +1115,7 @@
     window.removeEventListener("vvitools-open-settings", handleOpenSettings);
     window.removeEventListener("vvitools-open-clipboard", handleOpenClipboard);
     window.removeEventListener("vvitools-open-accessibility-permission", handleOpenAccessibilityPermission);
+    window.removeEventListener("keydown", handleGlobalKeydown);
     unlistenShowLauncher?.();
     unlistenOpenSettings?.();
     unlistenOpenClipboard?.();
@@ -1232,9 +1386,15 @@
       type="file"
     />
     <aside class="left-menu" data-tauri-drag-region>
-      <button class="back-mini" on:click={backToLauncher} type="button">
-        <ArrowLeft size={16} />
-        搜索
+      <button
+        class="sidebar-home"
+        on:click={backToLauncher}
+        type="button"
+        aria-label="返回 VviTools 搜索面板"
+        title="返回搜索面板"
+      >
+        <span class="sidebar-brand-icon"><PackageSearch size={16} /></span>
+        <strong>VviTools</strong>
       </button>
       <div class="feature-search">
         <Search size={16} />
@@ -1278,9 +1438,14 @@
     <section class="feature-container">
       {#if (view === "finder" || view === "installed") && marketDetailOpen && activeDetail}
           <article class="market-detail-page">
-            <button class="detail-back" on:click={closeMarketDetail} type="button" aria-label="返回插件列表">
-              <ArrowLeft size={18} />
-              返回
+            <button
+              class="detail-back detail-back-icon"
+              on:click={closeMarketDetail}
+              type="button"
+              aria-label="返回插件列表"
+              title="返回插件列表"
+            >
+              <ArrowLeft size={20} />
             </button>
             <section class="market-detail-hero">
               <span class="plugin-icon market-detail-icon">
@@ -1289,9 +1454,20 @@
               <div class="market-detail-title">
                 <div class="market-detail-name">
                   <h2>{activeDetail.name}</h2>
-                  <span>{activeDetail.bundled ? "内置" : installedIds.has(activeDetail.id) ? "已安装" : "可获取"}</span>
+                  {#if isClipboardEntry(activeDetail)}
+                    <button
+                      class="detail-settings-action title-settings-action"
+                      aria-label="剪贴板设置"
+                      title="剪贴板设置"
+                      on:click={openClipboardSettings}
+                      type="button"
+                    >
+                      <Settings size={17} />
+                    </button>
+                  {:else if !activeDetail.bundled}
+                    <span>{installedIds.has(activeDetail.id) ? "已安装" : "可获取"}</span>
+                  {/if}
                 </div>
-                <p>{activeDetail.description}</p>
                 <div class="market-detail-summary">
                   <span>版本 {activeDetail.version}</span>
                   <span>{activeDetail.categories.map(categoryLabel).join("、") || "通用工具"}</span>
@@ -1319,6 +1495,7 @@
                   </button>
                 {/if}
               </div>
+              <p class="market-detail-description">{activeDetail.description}</p>
             </section>
             <section class="market-detail-section">
               <header>
@@ -1397,7 +1574,9 @@
                   <strong>{item.name}</strong>
                   <small>{item.description}</small>
                 </span>
-                <em>{item.bundled ? "内置" : installedIds.has(item.id) ? "已安装" : "插件"}</em>
+                {#if !item.bundled}
+                  <em>{installedIds.has(item.id) ? "已安装" : "插件"}</em>
+                {/if}
                 {#if isClipboardEntry(item) || installedIds.has(item.id)}
                   <Check size={18} />
                 {:else}
@@ -1451,7 +1630,9 @@
                   <strong>{item.name}</strong>
                   <small>{item.description}</small>
                 </span>
-                <em>{item.bundled ? "内置" : "已安装"}</em>
+                {#if !item.bundled}
+                  <em>已安装</em>
+                {/if}
                 <Check size={18} />
               </button>
             {/each}
@@ -1469,6 +1650,183 @@
               </div>
             {/if}
           </div>
+        </div>
+      {:else if view === "clipboard-settings"}
+        <div class="clipboard-settings-page">
+          <button class="detail-back" on:click={backToClipboardDetail} type="button">
+            <ArrowLeft size={18} />
+            返回系统剪贴板
+          </button>
+          <div class="page-heading settings-heading">
+            <div class="view-title">剪贴板设置</div>
+            <small>控制记录范围、历史保留和本地存储</small>
+          </div>
+          <section class="settings-panel settings-page">
+            <div class="settings-group">
+              <h2>记录</h2>
+              <div class="settings-list">
+                <div class="settings-row">
+                  <span>
+                    <strong>记录剪贴板</strong>
+                    <small>关闭后暂停新增记录，已有历史和收藏不会被删除。</small>
+                  </span>
+                  <button
+                    class="settings-switch"
+                    class:enabled={clipboardSettings.enabled}
+                    disabled={clipboardSettingsLoading}
+                    aria-pressed={clipboardSettings.enabled}
+                    on:click={() => updateClipboardSettings({ enabled: !clipboardSettings.enabled })}
+                    type="button"
+                  >
+                    <span class="sr-only">{clipboardSettings.enabled ? "已开启" : "已关闭"}</span>
+                    <span class="settings-switch-thumb"></span>
+                  </button>
+                </div>
+                <div class="settings-row compact-setting">
+                  <span>
+                    <strong>文本</strong>
+                    <small>保存复制的文字、链接和代码片段。</small>
+                  </span>
+                  <button
+                    class="settings-switch"
+                    class:enabled={clipboardSettings.capture_text}
+                    disabled={clipboardSettingsLoading}
+                    aria-pressed={clipboardSettings.capture_text}
+                    on:click={() => updateClipboardSettings({ capture_text: !clipboardSettings.capture_text })}
+                    type="button"
+                  >
+                    <span class="sr-only">{clipboardSettings.capture_text ? "已开启" : "已关闭"}</span>
+                    <span class="settings-switch-thumb"></span>
+                  </button>
+                </div>
+                <div class="settings-row compact-setting">
+                  <span>
+                    <strong>图片</strong>
+                    <small>图片会作为 PNG 文件保存在本机。</small>
+                  </span>
+                  <button
+                    class="settings-switch"
+                    class:enabled={clipboardSettings.capture_images}
+                    disabled={clipboardSettingsLoading}
+                    aria-pressed={clipboardSettings.capture_images}
+                    on:click={() => updateClipboardSettings({ capture_images: !clipboardSettings.capture_images })}
+                    type="button"
+                  >
+                    <span class="sr-only">{clipboardSettings.capture_images ? "已开启" : "已关闭"}</span>
+                    <span class="settings-switch-thumb"></span>
+                  </button>
+                </div>
+                <div class="settings-row compact-setting">
+                  <span>
+                    <strong>文件</strong>
+                    <small>只保存文件路径，不会复制或移动原文件。</small>
+                  </span>
+                  <button
+                    class="settings-switch"
+                    class:enabled={clipboardSettings.capture_files}
+                    disabled={clipboardSettingsLoading}
+                    aria-pressed={clipboardSettings.capture_files}
+                    on:click={() => updateClipboardSettings({ capture_files: !clipboardSettings.capture_files })}
+                    type="button"
+                  >
+                    <span class="sr-only">{clipboardSettings.capture_files ? "已开启" : "已关闭"}</span>
+                    <span class="settings-switch-thumb"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="settings-group">
+              <h2>历史</h2>
+              <div class="settings-list">
+                <label class="settings-row" for="clipboard-retention">
+                  <span>
+                    <strong>保留时长</strong>
+                    <small>到期的普通记录会自动清理，收藏内容不受影响。</small>
+                  </span>
+                  <select
+                    id="clipboard-retention"
+                    class="settings-select"
+                    disabled={clipboardSettingsLoading}
+                    value={clipboardSettings.retention_days}
+                    on:change={changeClipboardRetention}
+                  >
+                    <option value="1">1 天</option>
+                    <option value="7">7 天</option>
+                    <option value="30">30 天</option>
+                    <option value="90">90 天</option>
+                    <option value="0">永久保留</option>
+                  </select>
+                </label>
+                <label class="settings-row" for="clipboard-max-items">
+                  <span>
+                    <strong>最大历史条数</strong>
+                    <small>达到上限后优先保留收藏，再清理较旧的普通记录。</small>
+                  </span>
+                  <select
+                    id="clipboard-max-items"
+                    class="settings-select"
+                    disabled={clipboardSettingsLoading}
+                    value={clipboardSettings.max_items}
+                    on:change={changeClipboardMaxItems}
+                  >
+                    <option value="100">100 条</option>
+                    <option value="200">200 条</option>
+                    <option value="500">500 条</option>
+                    <option value="1000">1000 条</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div class="settings-group">
+              <h2>存储</h2>
+              <div class="settings-list">
+                <div class="settings-row storage-row">
+                  <span>
+                    <strong>本地存储位置</strong>
+                    <small class="settings-path" title={clipboardStorageInfo.directory}>
+                      {clipboardStorageInfo.directory || "正在读取..."}
+                    </small>
+                  </span>
+                  <button class="secondary settings-icon-action" on:click={openClipboardStorageLocation} type="button">
+                    <FolderOpen size={15} />
+                    在 Finder 中打开
+                  </button>
+                </div>
+                <div class="settings-row">
+                  <span>
+                    <strong>存储占用</strong>
+                    <small>
+                      {clipboardStorageInfo.item_count} 条记录，其中 {clipboardStorageInfo.image_count} 张图片
+                    </small>
+                  </span>
+                  <em>{formatBytes(clipboardStorageInfo.total_bytes)}</em>
+                </div>
+                <div class="settings-row">
+                  <span>
+                    <strong>清空全部历史</strong>
+                    <small>删除所有记录和已保存图片，剪贴板设置保持不变。</small>
+                  </span>
+                  <div class="settings-actions">
+                    {#if clipboardClearConfirm}
+                      <button class="secondary" on:click={() => (clipboardClearConfirm = false)} type="button">
+                        取消
+                      </button>
+                    {/if}
+                    <button
+                      class:confirming={clipboardClearConfirm}
+                      class="danger-action"
+                      disabled={clipboardSettingsLoading || clipboardStorageInfo.item_count === 0}
+                      on:click={clearClipboardHistory}
+                      type="button"
+                    >
+                      <Trash2 size={15} />
+                      {clipboardClearConfirm ? "确认清空" : "清空"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
       {:else}
         <div class="page-heading settings-heading">

@@ -4,6 +4,28 @@
 
 ---
 
+## [ERR-20260914-005] ui-ux-pro-max-script-pointer
+
+**Logged**: 2026-09-14T14:00:00+08:00
+**Priority**: low
+**Status**: resolved
+
+### Summary
+本地 ui-ux-pro-max skill 的 scripts 入口是文本指针，不能直接作为目录执行。
+
+### Details
+按 skill 文档调用 `~/.codex/skills/ui-ux-pro-max/scripts/search.py` 时返回 `Not a directory`。通过查找已安装插件源码中的真实 `search.py` 后完成设计系统和 Svelte 指南查询。
+
+### Suggested Action
+后续先解析 skill 目录中的文本指针，或从插件安装目录定位真实脚本路径。
+
+### Metadata
+- Source: error
+- Related Files: /Users/liam/.codex/skills/ui-ux-pro-max/scripts
+- Tags: skill, ui-ux-pro-max, path
+
+---
+
 ## [ERR-20260914-004] plugin-detail-open
 
 **Logged**: 2026-09-14T12:55:00+08:00
