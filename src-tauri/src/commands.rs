@@ -3,10 +3,7 @@ use std::{
     fs,
     path::PathBuf,
     process::Command,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Mutex, OnceLock,
-    },
+    sync::{Mutex, OnceLock},
     thread,
     time::Duration,
 };
@@ -114,32 +111,10 @@ pub struct DockVisibilityRequest {
     pub enabled: bool,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct FloatingWindowRequest {
-    pub enabled: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct FloatingDragRequest {
-    pub screen_x: f64,
-    pub screen_y: f64,
-}
-
-#[derive(Debug)]
-struct FloatingDragState {
-    start_screen_x: f64,
-    start_screen_y: f64,
-    window_x: i32,
-    window_y: i32,
-    scale: f64,
-}
-
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     dock_visible: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    floating_window_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     status_bar_mode: Option<bool>,
 }
@@ -149,11 +124,6 @@ impl AppSettings {
         self.dock_visible
             .or_else(|| self.status_bar_mode.map(|enabled| !enabled))
             .unwrap_or_else(default_dock_visible)
-    }
-
-    fn floating_window_enabled(&self) -> bool {
-        self.floating_window_enabled
-            .unwrap_or_else(default_floating_window_enabled)
     }
 }
 
@@ -210,8 +180,6 @@ const CLIPBOARD_PREVIEW_LIMIT: usize = 160;
 const APP_BUNDLE_ID: &str = "dev.vvicat.vvitools";
 
 static PREVIOUS_FRONTMOST_APP: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-static FLOATING_DRAG_STATE: OnceLock<Mutex<Option<FloatingDragState>>> = OnceLock::new();
-static ACCESSIBILITY_PROMPT_SHOWN: OnceLock<AtomicBool> = OnceLock::new();
 
 #[tauri::command]
 pub fn list_plugins(app: tauri::AppHandle) -> Result<Vec<PluginView>, String> {
@@ -255,25 +223,6 @@ pub fn set_dock_visible_enabled(
     let mut settings = load_app_settings().map_err(to_message)?;
     settings.dock_visible = Some(request.enabled);
     settings.status_bar_mode = None;
-    save_app_settings(&settings).map_err(to_message)?;
-    Ok(request.enabled)
-}
-
-#[tauri::command]
-pub fn is_floating_window_enabled() -> Result<bool, String> {
-    Ok(load_app_settings()
-        .map_err(to_message)?
-        .floating_window_enabled())
-}
-
-#[tauri::command]
-pub fn set_floating_window_enabled(
-    app: AppHandle,
-    request: FloatingWindowRequest,
-) -> Result<bool, String> {
-    apply_floating_window_visibility(&app, request.enabled)?;
-    let mut settings = load_app_settings().map_err(to_message)?;
-    settings.floating_window_enabled = Some(request.enabled);
     save_app_settings(&settings).map_err(to_message)?;
     Ok(request.enabled)
 }
@@ -345,7 +294,7 @@ pub fn paste_clipboard_item(
 ) -> Result<ClipboardPasteResult, String> {
     copy_clipboard_item_by_id(&request.id)?;
     if !is_accessibility_trusted(false) {
-        let status = request_accessibility_permission_for_paste();
+        let status = accessibility_status(false);
         return Ok(ClipboardPasteResult {
             copied: true,
             paste_requested: false,
@@ -419,18 +368,6 @@ pub fn accessibility_permission_status() -> Result<AccessibilityPermissionStatus
 #[tauri::command]
 pub fn request_accessibility_permission() -> Result<AccessibilityPermissionStatus, String> {
     Ok(accessibility_status(true))
-}
-
-fn request_accessibility_permission_for_paste() -> AccessibilityPermissionStatus {
-    let prompt_shown = accessibility_prompt_shown();
-    if prompt_shown.swap(true, Ordering::SeqCst) {
-        return accessibility_status(false);
-    }
-    accessibility_status(true)
-}
-
-fn accessibility_prompt_shown() -> &'static AtomicBool {
-    ACCESSIBILITY_PROMPT_SHOWN.get_or_init(|| AtomicBool::new(false))
 }
 
 fn accessibility_status(prompt: bool) -> AccessibilityPermissionStatus {
@@ -786,21 +723,9 @@ pub fn open_clipboard_window(app: tauri::AppHandle) -> Result<(), String> {
         .ok_or_else(|| "剪贴板窗口不存在".to_string())?;
     remember_frontmost_app();
     apply_launcher_window(&window, "clipboard")?;
-    window.show().map_err(to_message)?;
     let _ = window.emit("open-clipboard", ());
     let _ = window.eval("window.dispatchEvent(new CustomEvent('vvitools-open-clipboard'))");
-    window.set_focus().map_err(to_message)
-}
-
-#[tauri::command]
-pub fn open_launcher_from_floating(app: tauri::AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?;
-    apply_launcher_window(&window, "launcher")?;
     window.show().map_err(to_message)?;
-    let _ = window.emit("show-launcher", ());
-    let _ = window.eval("window.dispatchEvent(new CustomEvent('vvitools-show-launcher'))");
     window.set_focus().map_err(to_message)
 }
 
@@ -818,60 +743,6 @@ pub fn open_accessibility_permission_window(app: tauri::AppHandle) -> Result<(),
     let _ = window
         .eval("window.dispatchEvent(new CustomEvent('vvitools-open-accessibility-permission'))");
     window.set_focus().map_err(to_message)
-}
-
-#[tauri::command]
-pub fn begin_floating_drag(app: AppHandle, request: FloatingDragRequest) -> Result<(), String> {
-    let window = app
-        .get_webview_window("floating")
-        .ok_or_else(|| "悬浮窗不存在".to_string())?;
-    let position = window.outer_position().map_err(to_message)?;
-    let scale = window
-        .current_monitor()
-        .map_err(to_message)?
-        .map(|monitor| monitor.scale_factor())
-        .unwrap_or(1.0);
-    *floating_drag_state().lock().map_err(to_message)? = Some(FloatingDragState {
-        start_screen_x: request.screen_x,
-        start_screen_y: request.screen_y,
-        window_x: position.x,
-        window_y: position.y,
-        scale,
-    });
-    Ok(())
-}
-
-#[tauri::command]
-pub fn move_floating_drag(app: AppHandle, request: FloatingDragRequest) -> Result<bool, String> {
-    let state = floating_drag_state().lock().map_err(to_message)?;
-    let Some(state) = state.as_ref() else {
-        return Ok(false);
-    };
-    let window = app
-        .get_webview_window("floating")
-        .ok_or_else(|| "悬浮窗不存在".to_string())?;
-    let dx = ((request.screen_x - state.start_screen_x) * state.scale).round() as i32;
-    let dy = ((request.screen_y - state.start_screen_y) * state.scale).round() as i32;
-    let moved = dx.abs() >= 4 || dy.abs() >= 4;
-    if moved {
-        window
-            .set_position(Position::Physical(PhysicalPosition::new(
-                state.window_x + dx,
-                state.window_y + dy,
-            )))
-            .map_err(to_message)?;
-    }
-    Ok(moved)
-}
-
-#[tauri::command]
-pub fn end_floating_drag() -> Result<(), String> {
-    *floating_drag_state().lock().map_err(to_message)? = None;
-    Ok(())
-}
-
-fn floating_drag_state() -> &'static Mutex<Option<FloatingDragState>> {
-    FLOATING_DRAG_STATE.get_or_init(|| Mutex::new(None))
 }
 
 #[tauri::command]
@@ -898,7 +769,7 @@ pub fn set_launcher_view(app: tauri::AppHandle, view: String) -> Result<(), Stri
 pub fn apply_launcher_window(window: &WebviewWindow, view: &str) -> Result<(), String> {
     let size = match view {
         "feature" => LogicalSize::new(980.0, 640.0),
-        "permission" => LogicalSize::new(680.0, 500.0),
+        "permission" => LogicalSize::new(500.0, 340.0),
         "clipboard" => LogicalSize::new(940.0, 238.0),
         _ => LogicalSize::new(720.0, 420.0),
     };
@@ -924,26 +795,6 @@ pub fn apply_launcher_window(window: &WebviewWindow, view: &str) -> Result<(), S
         let _ = window.center();
     }
     let _ = window.set_focus();
-    Ok(())
-}
-
-pub fn apply_floating_window(window: &WebviewWindow) -> Result<(), String> {
-    let size = LogicalSize::new(72.0, 72.0);
-    window.set_size(Size::Logical(size)).map_err(to_message)?;
-    if let Ok(Some(monitor)) = window.current_monitor() {
-        let scale = monitor.scale_factor();
-        let work_area = monitor.work_area();
-        let width = size.width * scale;
-        let height = size.height * scale;
-        let x = work_area.position.x as f64 + work_area.size.width as f64 - width - 22.0 * scale;
-        let y = work_area.position.y as f64 + (work_area.size.height as f64 - height) / 2.0;
-        window
-            .set_position(Position::Physical(PhysicalPosition::new(
-                x.round() as i32,
-                y.round() as i32,
-            )))
-            .map_err(to_message)?;
-    }
     Ok(())
 }
 
@@ -1228,28 +1079,6 @@ pub fn load_dock_visible_setting() -> bool {
         .unwrap_or_else(|_| default_dock_visible())
 }
 
-pub fn load_floating_window_setting() -> bool {
-    load_app_settings()
-        .map(|settings| settings.floating_window_enabled())
-        .unwrap_or_else(|_| default_floating_window_enabled())
-}
-
-pub fn apply_floating_window_visibility(app: &AppHandle, enabled: bool) -> Result<(), String> {
-    let Some(window) = app.get_webview_window("floating") else {
-        return Ok(());
-    };
-
-    if enabled {
-        apply_floating_window(&window)?;
-        window.show().map_err(to_message)?;
-    } else {
-        let _ = end_floating_drag();
-        window.hide().map_err(to_message)?;
-    }
-
-    Ok(())
-}
-
 pub fn apply_dock_visibility(app: &AppHandle, enabled: bool) -> Result<(), String> {
     if let Some(tray) = app.tray_by_id("vvitools") {
         tray.set_visible(true).map_err(to_message)?;
@@ -1298,10 +1127,6 @@ fn app_settings_path() -> PathBuf {
 
 fn default_dock_visible() -> bool {
     false
-}
-
-fn default_floating_window_enabled() -> bool {
-    true
 }
 
 fn normalize_version(version: &str) -> String {

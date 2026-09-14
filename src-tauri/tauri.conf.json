@@ -40,23 +40,6 @@
         "alwaysOnTop": true,
         "shadow": true,
         "transparent": false
-      },
-      {
-        "label": "floating",
-        "title": "VviTools 悬浮窗",
-        "url": "index.html?window=floating",
-        "width": 72,
-        "height": 72,
-        "minWidth": 72,
-        "minHeight": 72,
-        "visible": false,
-        "acceptFirstMouse": true,
-        "decorations": false,
-        "resizable": false,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "shadow": false,
-        "transparent": true
       }
     ],
     "security": {

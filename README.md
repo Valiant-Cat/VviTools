@@ -76,6 +76,31 @@ macOS 打包产物：
 src-tauri/target/release/bundle/macos/VviTools.app
 ```
 
+本机构建并安装到 `/Applications/VviTools.app`：
+
+```bash
+npm run signing:setup
+npm run build:install
+```
+
+`signing:setup` 只需执行一次，它会在当前用户登录钥匙串中创建长期有效的 `VviTools Local Development` 代码签名身份。本地安装构建始终使用该身份，避免每次重新编译后 macOS 将 VviTools 识别成新的辅助功能授权对象。
+
+首次从临时签名切换到稳定签名后，需要清理旧授权并对 `/Applications/VviTools.app` 重新授权一次：
+
+```bash
+tccutil reset Accessibility dev.vvicat.vvitools
+```
+
+后续只要保留当前钥匙串证书、Bundle ID 和签名身份，重新执行 `npm run build:install` 不需要重复移除和添加辅助功能权限。
+
+安装已经生成的 `.app`：
+
+```bash
+npm run install:macos
+```
+
+安装成功后会清理 `src-tauri/target/release/bundle/macos/VviTools.app`，避免本机同时保留两个应用副本。
+
 ## 插件 manifest 示例
 
 ```json

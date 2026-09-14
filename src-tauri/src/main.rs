@@ -46,11 +46,7 @@ fn main() {
             commands::open_external,
             commands::check_for_update,
             commands::open_clipboard_window,
-            commands::open_launcher_from_floating,
             commands::open_accessibility_permission_window,
-            commands::begin_floating_drag,
-            commands::move_floating_drag,
-            commands::end_floating_drag,
             commands::hide_launcher,
             commands::hide_window,
             commands::set_launcher_view,
@@ -58,8 +54,6 @@ fn main() {
             commands::set_autostart_enabled,
             commands::is_dock_visible_enabled,
             commands::set_dock_visible_enabled,
-            commands::is_floating_window_enabled,
-            commands::set_floating_window_enabled,
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "clipboard")
@@ -107,13 +101,6 @@ fn main() {
                 let _ = window.set_focus();
                 window.show()?;
             }
-            if let Some(window) = app.get_webview_window("floating") {
-                let _ = commands::apply_floating_window(&window);
-                let _ = commands::apply_floating_window_visibility(
-                    app.handle(),
-                    commands::load_floating_window_setting(),
-                );
-            }
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -141,9 +128,9 @@ fn show_clipboard(app: &AppHandle) {
         } else {
             commands::remember_frontmost_app();
             let _ = commands::apply_launcher_window(&window, "clipboard");
-            let _ = window.show();
             let _ = window.emit("open-clipboard", ());
             let _ = window.eval("window.dispatchEvent(new CustomEvent('vvitools-open-clipboard'))");
+            let _ = window.show();
             let _ = window.set_focus();
         }
     }

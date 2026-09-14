@@ -9,8 +9,11 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420",
     "build": "vite build",
+    "build:install": "zsh scripts/build-install-macos.sh",
+    "install:macos": "zsh scripts/install-macos-app.sh",
     "preview": "vite preview --host 127.0.0.1",
     "plugin": "node cli/bin/vvitools.mjs plugin",
+    "signing:setup": "zsh scripts/setup-macos-signing.sh",
     "tauri": "tauri",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml"
   },

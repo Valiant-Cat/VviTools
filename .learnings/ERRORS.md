@@ -4,6 +4,52 @@
 
 ---
 
+## [ERR-20260914-001] exec_command
+
+**Logged**: 2026-09-14T10:48:59+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: config
+
+### Summary
+内联证书生成命令因包含递归删除临时目录而被命令安全规则拒绝。
+
+### Details
+首次尝试以内联 shell 创建本地代码签名证书，清理 trap 中的 `rm -rf` 被执行工具拒绝，命令未运行且未创建证书。
+
+### Suggested Action
+证书生成使用项目脚本封装，并通过删除已知临时文件后 `rmdir` 的方式清理，不使用递归强制删除。
+
+### Metadata
+- Source: error
+- Related Files: scripts/setup-macos-signing.sh
+- Tags: codesign, keychain, command-safety
+
+---
+
+## [ERR-20260914-002] security-import
+
+**Logged**: 2026-09-14T10:49:33+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: config
+
+### Summary
+登录钥匙串路径包含前导空格，导致证书导入报告找不到钥匙串。
+
+### Details
+`security default-keychain -d user` 输出包含缩进和引号。脚本最初只移除了引号，保留的前导空格使 `security import` 无法定位实际存在的 `login.keychain-db`。
+
+### Suggested Action
+解析 security 命令输出时同时移除首尾空白和包裹引号，并在导入前使用真实路径。
+
+### Metadata
+- Source: error
+- Related Files: scripts/setup-macos-signing.sh, scripts/build-install-macos.sh
+- Tags: codesign, keychain, parsing
+
+---
+
 ## [ERR-20260714-001] rubick-source-run
 
 **Logged**: 2026-07-14T03:42:00Z

@@ -4,6 +4,75 @@
 
 ---
 
+## [LRN-20260914-003] clipboard-feedback
+
+**Logged**: 2026-09-14T11:14:36+08:00
+**Priority**: high
+**Status**: done
+**Area**: frontend
+
+### Summary
+点击剪贴板 item 后，不应把第一项或列表区域临时改成状态提示。
+
+### Details
+无论辅助功能权限是否开启，剪贴板第一项都应保持原内容。未授权时由独立引导弹窗说明；已授权时直接关闭窗口并粘贴。窗口重新唤出前应先清空旧状态，避免状态条残留造成第一项闪动或位移。
+
+### Suggested Action
+关闭剪贴板窗口的操作不写入列表内状态提示；重新显示窗口时先分发重置事件，再调用 show。
+
+### Metadata
+- Source: user_feedback
+- Related Files: src/App.svelte, src-tauri/src/commands.rs, src-tauri/src/main.rs
+- Tags: clipboard, feedback, flicker, permission
+
+---
+
+## [LRN-20260914-002] macos-accessibility-signing
+
+**Logged**: 2026-09-14T10:53:50+08:00
+**Priority**: high
+**Status**: done
+**Area**: config
+
+### Summary
+VviTools 本地安装构建必须使用固定代码签名身份，才能跨重新编译保留 macOS 辅助功能授权。
+
+### Details
+Ad-hoc 签名的 Designated Requirement 绑定每次构建的 CDHash，重新编译后 TCC 会视为新的应用身份。固定自签名证书后，不同 CDHash 的构建仍共享由 Bundle ID 和证书根组成的 Designated Requirement。首次切换签名需重新授权一次，后续构建可复用授权。
+
+### Suggested Action
+本机先运行 `npm run signing:setup`，之后始终使用 `npm run build:install`。不要删除登录钥匙串中的 `VviTools Local Development` 身份，也不要随意变更 Bundle ID。
+
+### Metadata
+- Source: conversation
+- Related Files: scripts/setup-macos-signing.sh, scripts/build-install-macos.sh, package.json
+- Tags: macos, accessibility, tcc, codesign
+
+---
+
+## [LRN-20260914-001] macos-install
+
+**Logged**: 2026-09-14T10:41:11+08:00
+**Priority**: high
+**Status**: done
+**Area**: config
+
+### Summary
+VviTools 本地构建安装流程成功后只能保留 `/Applications` 中的应用。
+
+### Details
+用户指出复制构建产物到 `/Applications` 会同时留下 target 中的 `.app`，形成两个应用副本。正确流程是在安装成功后清理构建目录中的 `.app`，并确保运行的是 Applications 中的版本。
+
+### Suggested Action
+后续修改 macOS 本地安装流程时，应检查文件系统和运行中进程，确认只存在 `/Applications/VviTools.app`。
+
+### Metadata
+- Source: user_feedback
+- Related Files: scripts/install-macos-app.sh, README.md
+- Tags: macos, build, install, duplicate
+
+---
+
 ## [LRN-20260803-001] plugin-cli-module-boundary
 
 **Logged**: 2026-08-03T03:03:00Z

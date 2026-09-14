@@ -70,53 +70,6 @@ button {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
 }
 
-.floating-window {
-  width: 100vw;
-  height: 100vh;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  background: transparent;
-  user-select: none;
-}
-
-.floating-trigger {
-  width: 58px;
-  height: 58px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  background: #1677ff;
-  border: 0;
-  border-radius: 14px;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    0 12px 28px rgba(22, 119, 255, 0.32);
-}
-
-.floating-trigger:hover {
-  background: #0f6be8;
-}
-
-.floating-trigger:active {
-  transform: translateY(1px);
-}
-
-.floating-mark {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 2px solid rgba(255, 255, 255, 0.9);
-  border-radius: 9px;
-  font-size: 17px;
-  font-weight: 850;
-  letter-spacing: 0;
-}
-
 .search-window {
   display: grid;
   grid-template-rows: 60px 1fr;
@@ -125,7 +78,7 @@ button {
 .permission-window {
   display: block;
   padding: 0;
-  background: #fff;
+  background: #fbfcfe;
 }
 
 .main-search {
@@ -1673,13 +1626,14 @@ pre {
 }
 
 .permission-dialog {
-  width: min(620px, calc(100vw - 56px));
-  display: grid;
-  grid-template-rows: 58px minmax(0, 1fr) 58px;
+  width: min(468px, calc(100vw - 40px));
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28);
+  background: #fbfcfe;
+  border: 1px solid #dfe4ec;
+  border-radius: 7px;
+  box-shadow: 0 18px 48px rgba(25, 35, 50, 0.2);
 }
 
 .permission-dialog.standalone {
@@ -1687,6 +1641,7 @@ pre {
   height: 100%;
   max-height: none;
   border-radius: 0;
+  border: 0;
   box-shadow: none;
 }
 
@@ -1698,23 +1653,25 @@ pre {
   align-items: center;
 }
 
-.import-dialog header,
-.permission-dialog header {
+.import-dialog header {
   justify-content: space-between;
   padding: 0 30px;
   border-bottom: 1px solid var(--border-light);
 }
 
-.import-dialog h2,
-.permission-dialog h2 {
+.permission-dialog header {
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+}
+
+.import-dialog h2 {
   margin: 0;
   color: var(--text-primary);
   font-size: 20px;
   font-weight: 800;
 }
 
-.import-dialog header button,
-.permission-dialog header button {
+.import-dialog header button {
   width: 34px;
   height: 34px;
   display: grid;
@@ -1723,57 +1680,130 @@ pre {
   background: transparent;
 }
 
-.permission-body {
+.permission-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.permission-heading > span:last-child {
+  min-width: 0;
   display: grid;
-  gap: 10px;
+  gap: 2px;
+}
+
+.permission-heading small {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.permission-heading h2 {
+  margin: 0;
+  color: #182230;
+  font-size: 18px;
+  font-weight: 780;
+}
+
+.permission-icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: grid;
+  place-items: center;
+  color: #1267d6;
+  background: #eaf3ff;
+  border-radius: 7px;
+}
+
+.permission-close {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  color: #7b8491;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.permission-close:hover {
+  color: #273240;
+  background: #edf0f4;
+}
+
+.permission-body {
+  flex: 1;
+  display: grid;
+  align-content: start;
+  gap: 16px;
   overflow: auto;
-  padding: 18px 30px;
+  padding: 0 24px 20px;
   color: var(--text-content);
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.55;
 }
 
 .permission-body p {
   margin: 0;
-  color: var(--text-primary);
+  color: #4e5968;
 }
 
-.permission-steps {
+.permission-flow {
   display: grid;
-  gap: 4px;
-  padding: 12px 14px;
-  background: #f7f9fc;
-  border: 1px solid var(--border-light);
-  border-radius: 6px;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid #e5e9ef;
+  border-bottom: 1px solid #e5e9ef;
 }
 
-.permission-path {
+.permission-flow > div {
+  min-width: 0;
   display: grid;
-  gap: 6px;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 9px;
+  padding: 14px 12px 14px 0;
 }
 
-.permission-path strong {
-  color: var(--text-primary);
+.permission-flow > div + div {
+  padding-left: 14px;
+  border-left: 1px solid #e5e9ef;
+}
+
+.permission-flow > div > span {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  color: #6f7885;
+  background: #edf0f4;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.permission-flow > div.current > span {
+  color: #fff;
+  background: #1677ff;
+}
+
+.permission-flow > div > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.permission-flow strong {
+  color: #273240;
   font-size: 13px;
 }
 
-.permission-path code {
-  max-width: 100%;
-  overflow: hidden;
-  padding: 8px 10px;
-  color: #595959;
-  background: #fafafa;
-  border: 1px solid var(--border-light);
-  border-radius: 6px;
-  direction: rtl;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.permission-body small {
-  color: var(--text-desc);
-  font-size: 12px;
+.permission-flow small {
+  color: #7b8491;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .import-body {
@@ -1831,12 +1861,62 @@ pre {
   font-size: 13px;
 }
 
-.import-dialog footer,
-.permission-dialog footer {
+.import-dialog footer {
   justify-content: flex-end;
   gap: 10px;
   padding: 0 30px;
   border-top: 1px solid var(--border-light);
+}
+
+.permission-dialog footer {
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 24px;
+  background: #f7f8fa;
+  border-top: 1px solid var(--border-light);
+}
+
+.permission-dialog footer button {
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 15px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.permission-cancel {
+  color: #4e5968;
+  background: transparent;
+  border: 0;
+}
+
+.permission-cancel:hover {
+  background: #e9edf2;
+}
+
+.permission-primary {
+  color: #fff;
+  background: #1677ff;
+  border: 1px solid #1677ff;
+}
+
+.permission-primary:hover {
+  background: #0f6ddd;
+  border-color: #0f6ddd;
+}
+
+.permission-primary:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.permission-backdrop {
+  background: rgba(24, 34, 48, 0.24);
 }
 
 .empty-installed,

@@ -4,6 +4,7 @@
   import { onDestroy, tick } from "svelte";
   import {
     ArrowLeft,
+    ArrowRight,
     Box,
     Check,
     ClipboardList,
@@ -15,6 +16,7 @@
     Play,
     Search,
     Settings,
+    ShieldCheck,
     Star,
     Terminal,
     Trash2,
@@ -114,7 +116,6 @@
   const CLIPBOARD_APP_ID = "system-clipboard";
   const params = new URLSearchParams(window.location.search);
   const isClipboardWindow = params.get("window") === "clipboard";
-  const isFloatingWindow = params.get("window") === "floating";
   const pluginCategories: Array<{ key: PluginCategory; label: string }> = [
     { key: "explore", label: "探索" },
     { key: "efficiency", label: "效率" },
@@ -150,13 +151,9 @@
   let autostartLoading = false;
   let dockVisibleEnabled = false;
   let dockVisibleLoading = false;
-  let floatingWindowEnabled = false;
-  let floatingWindowLoading = false;
   let accessibilityPermissionGranted = false;
   let accessibilityPermissionSupported = false;
   let accessibilityPermissionLoading = false;
-  let accessibilityPermissionMessage = "";
-  let accessibilityAppPath = "";
   let showAccessibilityDialog = false;
   let updateLoading = false;
   let updateStatus = "";
@@ -168,15 +165,6 @@
   let unlistenOpenSettings: (() => void) | undefined;
   let unlistenOpenClipboard: (() => void) | undefined;
   let unlistenOpenAccessibilityPermission: (() => void) | undefined;
-  let floatingPointerStart:
-    | {
-        screenX: number;
-        screenY: number;
-        pointerId: number;
-      }
-    | null = null;
-  let floatingDragging = false;
-  let floatingMoved = false;
 
   $: installedIds = new Set(plugins.map((plugin) => plugin.id));
   $: customMarket = plugins.filter((plugin) => !plugin.bundled).map(pluginViewToMarketEntry);
@@ -236,21 +224,11 @@
     }
   }
 
-  async function loadFloatingWindowStatus() {
-    try {
-      floatingWindowEnabled = await invoke<boolean>("is_floating_window_enabled");
-    } catch (err) {
-      error = String(err);
-    }
-  }
-
   async function loadAccessibilityPermissionStatus() {
     try {
       const status = await invoke<AccessibilityPermissionStatus>("accessibility_permission_status");
       accessibilityPermissionGranted = status.granted;
       accessibilityPermissionSupported = status.supported;
-      accessibilityPermissionMessage = status.message;
-      accessibilityAppPath = status.app_path;
     } catch (err) {
       error = String(err);
     }
@@ -484,7 +462,6 @@
     clipboardStatus = "";
     await loadAutostartStatus();
     await loadDockVisibleStatus();
-    await loadFloatingWindowStatus();
     await loadAccessibilityPermissionStatus();
     await tick();
     resetViewport();
@@ -523,32 +500,15 @@
     }
   }
 
-  async function toggleFloatingWindow() {
-    if (floatingWindowLoading) return;
-    floatingWindowLoading = true;
-    error = "";
-    try {
-      floatingWindowEnabled = await invoke<boolean>("set_floating_window_enabled", {
-        request: { enabled: !floatingWindowEnabled },
-      });
-    } catch (err) {
-      error = String(err);
-      await loadFloatingWindowStatus();
-    } finally {
-      floatingWindowLoading = false;
-    }
-  }
-
   async function requestAccessibilityPermission() {
     if (accessibilityPermissionLoading) return;
     accessibilityPermissionLoading = true;
     error = "";
+    await closeAccessibilityDialog();
     try {
       const status = await invoke<AccessibilityPermissionStatus>("request_accessibility_permission");
       accessibilityPermissionGranted = status.granted;
       accessibilityPermissionSupported = status.supported;
-      accessibilityPermissionMessage = status.message;
-      accessibilityAppPath = status.app_path;
     } catch (err) {
       error = String(err);
     } finally {
@@ -571,24 +531,6 @@
     if (view === "permission") {
       view = "launcher";
       await hideLauncher();
-    }
-  }
-
-  async function openAccessibilitySettings() {
-    error = "";
-    try {
-      await invoke("open_accessibility_settings");
-    } catch (err) {
-      error = String(err);
-    }
-  }
-
-  async function revealCurrentAppInFinder() {
-    error = "";
-    try {
-      await invoke("reveal_current_app_in_finder");
-    } catch (err) {
-      error = String(err);
     }
   }
 
@@ -636,13 +578,9 @@
       if (closeAfterCopy) {
         const pasteResult = await invoke<ClipboardPasteResult>("paste_clipboard_item", { request: { id: item.id } });
         if (pasteResult.needs_accessibility_permission) {
-          clipboardStatus = "已复制，开启权限后可自动粘贴";
           accessibilityPermissionGranted = false;
           accessibilityPermissionSupported = true;
-          accessibilityPermissionMessage = pasteResult.message;
           await openAccessibilityDialog();
-        } else {
-          clipboardStatus = pasteResult.message || (pasteResult.paste_requested ? "已复制并自动粘贴" : "已复制");
         }
       } else {
         await invoke("copy_clipboard_item", { request: { id: item.id } });
@@ -740,93 +678,10 @@
 
   async function hideCurrentWindow() {
     try {
-      await invoke("hide_window", { label: isClipboardWindow ? "clipboard" : isFloatingWindow ? "floating" : "main" });
+      await invoke("hide_window", { label: isClipboardWindow ? "clipboard" : "main" });
     } catch {
       // 浏览器预览环境没有 Tauri 窗口。
     }
-  }
-
-  async function openLauncherFromFloating() {
-    try {
-      await invoke("open_launcher_from_floating");
-    } catch (err) {
-      error = String(err);
-    }
-  }
-
-  async function beginFloatingPointer(event: PointerEvent) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    if (event.currentTarget instanceof HTMLElement) {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }
-    floatingPointerStart = {
-      screenX: event.screenX,
-      screenY: event.screenY,
-      pointerId: event.pointerId,
-    };
-    floatingDragging = false;
-    floatingMoved = false;
-    try {
-      await invoke("begin_floating_drag", { request: { screen_x: event.screenX, screen_y: event.screenY } });
-    } catch {
-      floatingPointerStart = null;
-    }
-  }
-
-  async function moveFloatingPointer(event: PointerEvent) {
-    if (!floatingPointerStart || floatingDragging) return;
-    event.preventDefault();
-    const dx = event.screenX - floatingPointerStart.screenX;
-    const dy = event.screenY - floatingPointerStart.screenY;
-    if (!floatingMoved && Math.hypot(dx, dy) < 4) return;
-    floatingDragging = true;
-    try {
-      floatingMoved =
-        (await invoke<boolean>("move_floating_drag", {
-          request: { screen_x: event.screenX, screen_y: event.screenY },
-        })) || floatingMoved;
-    } catch {
-      // 浏览器预览环境没有 Tauri 窗口。
-    } finally {
-      floatingDragging = false;
-    }
-  }
-
-  async function endFloatingPointer(event: PointerEvent) {
-    const shouldOpen = floatingPointerStart && !floatingDragging && !floatingMoved;
-    if (event.currentTarget instanceof HTMLElement) {
-      try {
-        event.currentTarget.releasePointerCapture(floatingPointerStart?.pointerId ?? event.pointerId);
-      } catch {
-        // 指针捕获可能已被系统释放。
-      }
-    }
-    floatingPointerStart = null;
-    floatingDragging = false;
-    floatingMoved = false;
-    try {
-      await invoke("end_floating_drag");
-    } catch {
-      // 浏览器预览环境没有 Tauri 窗口。
-    }
-    if (shouldOpen) await openLauncherFromFloating();
-  }
-
-  function cancelFloatingPointer(event?: PointerEvent) {
-    if (event?.currentTarget instanceof HTMLElement && floatingPointerStart) {
-      try {
-        event.currentTarget.releasePointerCapture(floatingPointerStart.pointerId);
-      } catch {
-        // 指针捕获可能已被系统释放。
-      }
-    }
-    floatingPointerStart = null;
-    floatingDragging = false;
-    floatingMoved = false;
-    void invoke("end_floating_drag").catch(() => {
-      // 浏览器预览环境没有 Tauri 窗口。
-    });
   }
 
   async function activateSelected() {
@@ -1025,44 +880,41 @@
     return selectedCategoryLabel;
   }
 
-  if (!isFloatingWindow) {
-    refreshAll();
-    tick().then(() => searchInput?.focus());
-    window.addEventListener("vvitools-show-launcher", handleShowLauncher);
-    window.addEventListener("vvitools-open-settings", handleOpenSettings);
-    window.addEventListener("vvitools-open-clipboard", handleOpenClipboard);
-    window.addEventListener("vvitools-open-accessibility-permission", handleOpenAccessibilityPermission);
-    listen("show-launcher", handleShowLauncher)
-      .then((unlisten) => {
-        unlistenShowLauncher = unlisten;
-      })
-      .catch(() => {
-        // 浏览器预览环境没有 Tauri 事件总线。
-      });
-    listen("open-settings", handleOpenSettings)
-      .then((unlisten) => {
-        unlistenOpenSettings = unlisten;
-      })
-      .catch(() => {
-        // 浏览器预览环境没有 Tauri 事件总线。
-      });
-    listen("open-clipboard", handleOpenClipboard)
-      .then((unlisten) => {
-        unlistenOpenClipboard = unlisten;
-      })
-      .catch(() => {
-        // 浏览器预览环境没有 Tauri 事件总线。
-      });
-    listen("open-accessibility-permission", handleOpenAccessibilityPermission)
-      .then((unlisten) => {
-        unlistenOpenAccessibilityPermission = unlisten;
-      })
-      .catch(() => {
-        // 浏览器预览环境没有 Tauri 事件总线。
-      });
-  }
+  refreshAll();
+  tick().then(() => searchInput?.focus());
+  window.addEventListener("vvitools-show-launcher", handleShowLauncher);
+  window.addEventListener("vvitools-open-settings", handleOpenSettings);
+  window.addEventListener("vvitools-open-clipboard", handleOpenClipboard);
+  window.addEventListener("vvitools-open-accessibility-permission", handleOpenAccessibilityPermission);
+  listen("show-launcher", handleShowLauncher)
+    .then((unlisten) => {
+      unlistenShowLauncher = unlisten;
+    })
+    .catch(() => {
+      // 浏览器预览环境没有 Tauri 事件总线。
+    });
+  listen("open-settings", handleOpenSettings)
+    .then((unlisten) => {
+      unlistenOpenSettings = unlisten;
+    })
+    .catch(() => {
+      // 浏览器预览环境没有 Tauri 事件总线。
+    });
+  listen("open-clipboard", handleOpenClipboard)
+    .then((unlisten) => {
+      unlistenOpenClipboard = unlisten;
+    })
+    .catch(() => {
+      // 浏览器预览环境没有 Tauri 事件总线。
+    });
+  listen("open-accessibility-permission", handleOpenAccessibilityPermission)
+    .then((unlisten) => {
+      unlistenOpenAccessibilityPermission = unlisten;
+    })
+    .catch(() => {
+      // 浏览器预览环境没有 Tauri 事件总线。
+    });
   onDestroy(() => {
-    if (isFloatingWindow) return;
     window.removeEventListener("vvitools-show-launcher", handleShowLauncher);
     window.removeEventListener("vvitools-open-settings", handleOpenSettings);
     window.removeEventListener("vvitools-open-clipboard", handleOpenClipboard);
@@ -1074,22 +926,7 @@
   });
 </script>
 
-{#if isFloatingWindow}
-  <main class="floating-window" data-tauri-drag-region>
-    <div
-      class="floating-trigger"
-      role="button"
-      tabindex="0"
-      aria-label="打开 VviTools"
-      on:pointercancel={cancelFloatingPointer}
-      on:pointerdown={beginFloatingPointer}
-      on:pointermove={moveFloatingPointer}
-      on:pointerup={endFloatingPointer}
-    >
-      <span class="floating-mark">V</span>
-    </div>
-  </main>
-{:else if isClipboardWindow}
+{#if isClipboardWindow}
   <main class="rubick-window clipboard-window" data-tauri-drag-region>
     <header class="copycat-topbar">
       <strong>剪贴板</strong>
@@ -1208,34 +1045,51 @@
   </main>
 {:else if view === "permission"}
   <main class="rubick-window permission-window" data-tauri-drag-region>
-    <article class="permission-dialog standalone">
+    <div class="permission-dialog standalone" role="dialog" aria-modal="true" aria-labelledby="permission-title">
       <header>
-        <h2>开启自动粘贴权限</h2>
-        <button aria-label="关闭" on:click={() => closeAccessibilityDialog()} type="button"><X size={24} /></button>
+        <div class="permission-heading">
+          <span class="permission-icon"><ShieldCheck size={21} /></span>
+          <span>
+            <small>自动粘贴</small>
+            <h2 id="permission-title">开启辅助功能权限</h2>
+          </span>
+        </div>
+        <button class="permission-close" aria-label="关闭" on:click={() => closeAccessibilityDialog()} type="button">
+          <X size={18} />
+        </button>
       </header>
       <div class="permission-body">
-        <p>VviTools 需要 macOS 辅助功能权限，才能在选择剪贴板记录后切回原输入框并自动粘贴。</p>
-        <div class="permission-steps">
-          <span>1. 打开系统设置里的辅助功能权限。</span>
-          <span>2. 如果列表里已有 VviTools 但仍提示，请先移除旧记录。</span>
-          <span>3. 点击“定位应用”，把当前这个 VviTools.app 添加并开启。</span>
-        </div>
-        {#if accessibilityAppPath}
-          <div class="permission-path">
-            <strong>当前应用</strong>
-            <code>{accessibilityAppPath}</code>
+        <p>接下来 macOS 会显示系统授权提示。开启后，选择剪贴板记录即可自动粘贴回原输入框。</p>
+        <div class="permission-flow">
+          <div class="current">
+            <span>1</span>
+            <div>
+              <strong>确认授权说明</strong>
+              <small>VviTools 仅使用此权限完成自动粘贴。</small>
+            </div>
           </div>
-        {/if}
-        {#if accessibilityPermissionMessage}
-          <small>{accessibilityPermissionMessage}</small>
-        {/if}
+          <div>
+            <span>2</span>
+            <div>
+              <strong>在系统中允许</strong>
+              <small>按 macOS 提示开启 VviTools。</small>
+            </div>
+          </div>
+        </div>
       </div>
       <footer>
-        <button class="secondary" on:click={openAccessibilitySettings} type="button">打开系统设置</button>
-        <button class="secondary" on:click={revealCurrentAppInFinder} type="button">定位应用</button>
-        <button class="import-button" on:click={() => closeAccessibilityDialog()} type="button">知道了</button>
+        <button class="permission-cancel" on:click={() => closeAccessibilityDialog()} type="button">暂不开启</button>
+        <button
+          class="permission-primary"
+          disabled={accessibilityPermissionLoading}
+          on:click={requestAccessibilityPermission}
+          type="button"
+        >
+          继续授权
+          <ArrowRight size={16} />
+        </button>
       </footer>
-    </article>
+    </div>
   </main>
 {:else if view === "launcher"}
   <main class="rubick-window search-window" data-tauri-drag-region>
@@ -1603,27 +1457,6 @@
             </div>
             <div class="settings-row">
               <span>
-                <strong>桌面悬浮窗</strong>
-                <small>开启后显示可拖动的桌面入口；关闭后不显示悬浮入口。</small>
-              </span>
-              <button
-                class="settings-switch"
-                class:enabled={floatingWindowEnabled}
-                disabled={floatingWindowLoading}
-                aria-pressed={floatingWindowEnabled}
-                on:click={toggleFloatingWindow}
-                type="button"
-              >
-                {#if floatingWindowLoading}
-                  <Loader2 class="spin" size={14} />
-                {:else}
-                  <span class="sr-only">{floatingWindowEnabled ? "已开启" : "已关闭"}</span>
-                  <span class="settings-switch-thumb"></span>
-                {/if}
-              </button>
-            </div>
-            <div class="settings-row">
-              <span>
                 <strong>自动粘贴权限</strong>
                 <small>用于选择剪贴板记录后自动粘贴到原输入框。</small>
               </span>
@@ -1632,16 +1465,7 @@
                   {accessibilityPermissionGranted ? "已开启" : accessibilityPermissionSupported ? "未开启" : "无需授权"}
                 </em>
                 {#if !accessibilityPermissionGranted && accessibilityPermissionSupported}
-                  <button class="secondary" on:click={() => openAccessibilityDialog()} type="button">查看授权</button>
-                  <button
-                    class="secondary"
-                    disabled={accessibilityPermissionLoading}
-                    on:click={requestAccessibilityPermission}
-                    type="button"
-                  >
-                    {#if accessibilityPermissionLoading}<Loader2 class="spin" size={14} />{/if}
-                    授权
-                  </button>
+                  <button class="secondary" on:click={() => openAccessibilityDialog()} type="button">开启</button>
                 {/if}
               </div>
             </div>
@@ -1730,34 +1554,51 @@
 {/if}
 
 {#if showAccessibilityDialog && view !== "permission"}
-  <section class="modal-backdrop">
-    <article class="permission-dialog">
+  <section class="modal-backdrop permission-backdrop">
+    <div class="permission-dialog" role="dialog" aria-modal="true" aria-labelledby="permission-modal-title">
       <header>
-        <h2>开启自动粘贴权限</h2>
-        <button aria-label="关闭" on:click={() => closeAccessibilityDialog()} type="button"><X size={24} /></button>
+        <div class="permission-heading">
+          <span class="permission-icon"><ShieldCheck size={21} /></span>
+          <span>
+            <small>自动粘贴</small>
+            <h2 id="permission-modal-title">开启辅助功能权限</h2>
+          </span>
+        </div>
+        <button class="permission-close" aria-label="关闭" on:click={() => closeAccessibilityDialog()} type="button">
+          <X size={18} />
+        </button>
       </header>
       <div class="permission-body">
-        <p>VviTools 需要 macOS 辅助功能权限，才能在选择剪贴板记录后切回原输入框并自动粘贴。</p>
-        <div class="permission-steps">
-          <span>1. 打开系统设置里的辅助功能权限。</span>
-          <span>2. 如果列表里已有 VviTools 但仍提示，请先移除旧记录。</span>
-          <span>3. 点击“定位应用”，把当前这个 VviTools.app 添加并开启。</span>
-        </div>
-        {#if accessibilityAppPath}
-          <div class="permission-path">
-            <strong>当前应用</strong>
-            <code>{accessibilityAppPath}</code>
+        <p>接下来 macOS 会显示系统授权提示。开启后，选择剪贴板记录即可自动粘贴回原输入框。</p>
+        <div class="permission-flow">
+          <div class="current">
+            <span>1</span>
+            <div>
+              <strong>确认授权说明</strong>
+              <small>VviTools 仅使用此权限完成自动粘贴。</small>
+            </div>
           </div>
-        {/if}
-        {#if accessibilityPermissionMessage}
-          <small>{accessibilityPermissionMessage}</small>
-        {/if}
+          <div>
+            <span>2</span>
+            <div>
+              <strong>在系统中允许</strong>
+              <small>按 macOS 提示开启 VviTools。</small>
+            </div>
+          </div>
+        </div>
       </div>
       <footer>
-        <button class="secondary" on:click={openAccessibilitySettings} type="button">打开系统设置</button>
-        <button class="secondary" on:click={revealCurrentAppInFinder} type="button">定位应用</button>
-        <button class="import-button" on:click={() => closeAccessibilityDialog()} type="button">知道了</button>
+        <button class="permission-cancel" on:click={() => closeAccessibilityDialog()} type="button">暂不开启</button>
+        <button
+          class="permission-primary"
+          disabled={accessibilityPermissionLoading}
+          on:click={requestAccessibilityPermission}
+          type="button"
+        >
+          继续授权
+          <ArrowRight size={16} />
+        </button>
       </footer>
-    </article>
+    </div>
   </section>
 {/if}
