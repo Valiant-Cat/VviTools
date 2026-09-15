@@ -1876,10 +1876,40 @@ pre {
 }
 
 .settings-actions {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.update-progress {
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin-top: 10px;
+  accent-color: #26835b;
+}
+
+.settings-row .update-error {
+  color: #b33838;
+  overflow-wrap: anywhere;
+}
+
+.update-notes {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.update-notes summary {
+  cursor: pointer;
+}
+
+.update-notes p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
 }
 
 .settings-actions .secondary {
@@ -1903,6 +1933,19 @@ pre {
 
 .settings-row > span {
   min-width: 0;
+}
+
+.update-row {
+  flex-wrap: wrap;
+}
+
+.update-row > span {
+  flex: 1 1 240px;
+}
+
+.update-row .settings-actions {
+  margin-left: auto;
+  flex-wrap: wrap;
 }
 
 .settings-row:last-child {

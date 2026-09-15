@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import { Channel, invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { onDestroy, tick } from "svelte";
   import ClipboardSettingsView from "../plugins/system-clipboard/ui/ClipboardSettings.svelte";
@@ -72,8 +72,7 @@
     current_version: string;
     latest_version: string;
     has_update: boolean;
-    release_url: string;
-    message: string;
+    notes: string;
   };
 
   type RpcResult =
@@ -176,7 +175,15 @@
   let showAccessibilityDialog = false;
   let updateLoading = false;
   let updateStatus = "";
-  let updateReleaseUrl = "";
+  const updateReleaseUrl = "https://github.com/Valiant-Cat/VviTools/releases";
+  let appVersion = "";
+  let availableUpdate: UpdateInfo | null = null;
+  let updatePhase: "idle" | "downloading" | "installing" | "installed" = "idle";
+  let updateDownloaded = 0;
+  let updateTotal: number | null = null;
+  let updateError = "";
+  $: updateBusy = updateLoading || updatePhase === "downloading" || updatePhase === "installing";
+  $: updatePercent = updateTotal ? Math.min(100, Math.floor(updateDownloaded / updateTotal * 100)) : null;
   let searchInput: HTMLInputElement;
   let clipboardBoard: HTMLElement;
   let customFileInput: HTMLInputElement;
@@ -519,6 +526,7 @@
 
   async function openSettings() {
     view = "settings";
+    void invoke<string>("app_update_version").then((version) => { appVersion = version; }).catch(() => {});
     query = "";
     result = null;
     resultPluginId = "";
@@ -599,22 +607,55 @@
   }
 
   async function checkUpdate() {
-    if (updateLoading) return;
+    if (updateBusy || updatePhase === "installed") return;
     updateLoading = true;
     updateStatus = "";
-    updateReleaseUrl = "";
-    error = "";
+    updateError = "";
+    availableUpdate = null;
     try {
       const info = await invoke<UpdateInfo>("check_for_update");
-      updateReleaseUrl = info.release_url;
+      appVersion = info.current_version;
+      availableUpdate = info.has_update ? info : null;
       updateStatus = info.has_update
         ? `发现新版本 ${info.latest_version}，当前版本 ${info.current_version}`
-        : `${info.message}，当前版本 ${info.current_version}`;
+        : `已是最新版本 ${info.current_version}`;
     } catch (err) {
-      updateStatus = "";
-      error = String(err);
+      updateError = String(err);
     } finally {
       updateLoading = false;
+    }
+  }
+
+  async function installUpdate() {
+    if (updateBusy || !availableUpdate || updatePhase === "installed") return;
+    updatePhase = "downloading";
+    updateError = "";
+    updateDownloaded = 0;
+    updateTotal = null;
+    const onProgress = new Channel<{ phase: "downloading" | "installing"; downloaded: number; total: number | null }>();
+    onProgress.onmessage = (progress) => {
+      updatePhase = progress.phase;
+      updateDownloaded = progress.downloaded;
+      updateTotal = progress.total;
+    };
+    try {
+      await invoke("install_app_update", { onProgress });
+      updatePhase = "installed";
+      updateStatus = `版本 ${availableUpdate.latest_version} 已安装，重启后生效`;
+    } catch (err) {
+      updatePhase = "idle";
+      updateError = String(err);
+    } finally {
+      onProgress.onmessage = () => {};
+    }
+  }
+
+  async function restartUpdatedApp() {
+    updateError = "";
+    try {
+      await invoke("restart_after_update");
+    } catch (err) {
+      updateError = String(err);
     }
   }
 
@@ -1566,19 +1607,38 @@
           <div class="settings-group">
             <h2>应用</h2>
             <div class="settings-list">
-              <div class="settings-row">
+              <div class="settings-row update-row">
                 <span>
-                  <strong>检查更新</strong>
-                  <small>{updateStatus || "检查 GitHub Releases 中是否有新版本。"}</small>
+                  <strong>软件更新{appVersion ? ` · ${appVersion}` : ""}</strong>
+                  <small role="status" aria-live="polite">
+                    {#if updateLoading}正在检查更新…
+                    {:else if updatePhase === "downloading"}正在下载{updatePercent === null ? "" : ` ${updatePercent}%`} · {(updateDownloaded / 1048576).toFixed(1)} MB
+                    {:else if updatePhase === "installing"}签名校验通过，正在安装…
+                    {:else}{updateStatus || "尚未检查更新"}{/if}
+                  </small>
+                  {#if updatePhase === "downloading"}
+                    <progress class="update-progress" aria-label="更新下载进度" max="100" value={updatePercent ?? undefined}></progress>
+                  {/if}
+                  {#if updateError}<small class="update-error" role="alert">{updateError}</small>{/if}
+                  {#if availableUpdate?.notes}
+                    <details class="update-notes"><summary>更新说明</summary><p>{availableUpdate.notes}</p></details>
+                  {/if}
                 </span>
                 <div class="settings-actions">
-                  {#if updateReleaseUrl}
-                    <button class="secondary" on:click={openUpdateRelease} type="button">发布页</button>
+                  <button class="secondary" disabled={updateBusy} on:click={openUpdateRelease} type="button">发布页</button>
+                  {#if updatePhase === "installed"}
+                    <button class="secondary" on:click={restartUpdatedApp} type="button">重启应用</button>
+                  {:else}
+                    {#if availableUpdate}
+                      <button class="secondary" disabled={updateBusy} on:click={installUpdate} type="button">
+                        {#if updateBusy}<Loader2 class="spin" size={14} />{:else}<DownloadCloud size={14} />{/if}
+                        下载并安装
+                      </button>
+                    {/if}
+                    <button class="secondary" disabled={updateBusy} on:click={checkUpdate} type="button">
+                      {#if updateLoading}<Loader2 class="spin" size={14} />{/if}检查
+                    </button>
                   {/if}
-                  <button class="secondary" disabled={updateLoading} on:click={checkUpdate} type="button">
-                    {#if updateLoading}<Loader2 class="spin" size={14} />{/if}
-                    检查
-                  </button>
                 </div>
               </div>
               <div class="settings-row">

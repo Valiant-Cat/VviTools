@@ -48,25 +48,6 @@ pub struct PluginView {
     pub commands: usize,
 }
 
-#[derive(Debug, Serialize)]
-pub struct UpdateInfo {
-    pub current_version: String,
-    pub latest_version: String,
-    pub has_update: bool,
-    pub release_url: String,
-    pub message: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct GitHubRelease {
-    tag_name: String,
-    html_url: String,
-    #[serde(default)]
-    draft: bool,
-    #[serde(default)]
-    prerelease: bool,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct RunRequest {
     pub plugin_id: String,
@@ -749,50 +730,6 @@ pub fn delete_custom_plugin(request: DeletePluginRequest) -> Result<(), String> 
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {
     open::that(url).map_err(to_message)
-}
-
-#[tauri::command]
-pub fn check_for_update() -> Result<UpdateInfo, String> {
-    let current_version = env!("CARGO_PKG_VERSION").to_string();
-    let response = reqwest::blocking::Client::new()
-        .get("https://api.github.com/repos/Valiant-Cat/VviTools/releases/latest")
-        .header(reqwest::header::USER_AGENT, "VviTools")
-        .send()
-        .map_err(to_message)?;
-
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(UpdateInfo {
-            current_version: current_version.clone(),
-            latest_version: current_version,
-            has_update: false,
-            release_url: "https://github.com/Valiant-Cat/VviTools/releases".into(),
-            message: "暂无发布版本".into(),
-        });
-    }
-
-    let release: GitHubRelease = response
-        .error_for_status()
-        .map_err(to_message)?
-        .json()
-        .map_err(to_message)?;
-
-    if release.draft || release.prerelease {
-        return Err("暂无稳定更新版本".into());
-    }
-
-    let latest_version = normalize_version(&release.tag_name);
-    let has_update = is_newer_version(&latest_version, &current_version);
-    Ok(UpdateInfo {
-        message: if has_update {
-            format!("发现新版本 {}", latest_version)
-        } else {
-            "已是最新版本".into()
-        },
-        has_update,
-        current_version,
-        latest_version,
-        release_url: release.html_url,
-    })
 }
 
 #[tauri::command]
@@ -1645,31 +1582,6 @@ fn normalize_clipboard_settings(mut settings: ClipboardSettings) -> ClipboardSet
     settings.retention_days = settings.retention_days.min(3650);
     settings.max_items = settings.max_items.clamp(10, 5000);
     settings
-}
-
-fn normalize_version(version: &str) -> String {
-    version.trim().trim_start_matches('v').to_string()
-}
-
-fn is_newer_version(latest: &str, current: &str) -> bool {
-    let latest_parts = version_parts(latest);
-    let current_parts = version_parts(current);
-    for index in 0..latest_parts.len().max(current_parts.len()) {
-        let latest_part = *latest_parts.get(index).unwrap_or(&0);
-        let current_part = *current_parts.get(index).unwrap_or(&0);
-        if latest_part != current_part {
-            return latest_part > current_part;
-        }
-    }
-    false
-}
-
-fn version_parts(version: &str) -> Vec<u64> {
-    version
-        .split(|ch: char| !ch.is_ascii_digit())
-        .filter(|part| !part.is_empty())
-        .map(|part| part.parse::<u64>().unwrap_or(0))
-        .collect()
 }
 
 fn clipboard_images_dir() -> PathBuf {

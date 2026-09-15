@@ -1,6 +1,6 @@
 [package]
 name = "vvitools"
-version = "0.1.2"
+version = "0.1.3"
 description = "极简高性能插件化桌面工具箱"
 authors = ["liam"]
 edition = "2021"
@@ -42,6 +42,7 @@ tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "ti
 walkdir = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "c9ec2130422200f0863b23dfdad02b133a529b07" }

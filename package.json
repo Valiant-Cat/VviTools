@@ -1,6 +1,6 @@
 {
   "name": "vvitools",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -15,7 +15,7 @@
     "plugin": "node cli/bin/vvitools.mjs plugin",
     "signing:setup": "zsh scripts/setup-macos-signing.sh",
     "tauri": "tauri",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml"
+    "test": "node --test scripts/*.test.mjs && cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",

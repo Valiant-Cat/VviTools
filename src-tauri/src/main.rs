@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod updater;
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -32,6 +33,8 @@ fn main() {
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_nspanel::init());
     builder
+        .manage(updater::UpdateState::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -64,7 +67,10 @@ fn main() {
             commands::import_custom_plugin_config,
             commands::delete_custom_plugin,
             commands::open_external,
-            commands::check_for_update,
+            updater::check_for_update,
+            updater::app_update_version,
+            updater::install_app_update,
+            updater::restart_after_update,
             commands::open_clipboard_window,
             commands::open_accessibility_permission_window,
             commands::hide_launcher,
