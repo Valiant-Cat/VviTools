@@ -22,6 +22,7 @@
         "decorations": false,
         "resizable": true,
         "alwaysOnTop": true,
+        "visibleOnAllWorkspaces": true,
         "shadow": true,
         "transparent": false
       },
@@ -38,6 +39,7 @@
         "decorations": false,
         "resizable": false,
         "alwaysOnTop": true,
+        "visibleOnAllWorkspaces": true,
         "shadow": true,
         "transparent": false
       }

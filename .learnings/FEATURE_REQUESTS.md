@@ -4,6 +4,40 @@
 
 ---
 
+## [FEAT-20260915-001] macos_fullscreen_overlay
+
+**Logged**: 2026-09-15T11:51:52+08:00
+**Priority**: high
+**Status**: verified
+**Area**: backend | config
+
+### Requested Capability
+VviTools 主面板和剪贴板窗口应能在其他 macOS 应用处于全屏状态时正常弹出。
+
+### User Context
+仅设置窗口置顶不能跨越 macOS 的全屏 Space，导致全屏工作时快捷键已触发但看不到窗口。
+
+### Complexity Estimate
+simple
+
+### Suggested Implementation
+窗口默认加入所有工作区，并在 AppKit 层声明 `CanJoinAllSpaces` 与 `FullScreenAuxiliary` collection behavior。
+
+### Verification
+最终验收：用户确认全屏弹出和扩展屏跟随已生效。最终版本统一原生窗口定位，并在 AX 权限不可用时通过前台进程的可见窗口边界选屏。构建、10 项测试和安装版签名检查通过。以下保留排障经过。
+
+第一版普通 NSWindow 加工作区标记、激活应用的方案虽然通过构建和测试，但用户明确反馈全屏下没有生效，不能视为修复完成。当前改用固定版本的 tauri-nspanel，将窗口转换为可接收键盘输入的非激活式 NSPanel，并移除显示时激活整个应用的逻辑。全屏和多屏焦点跟随仍需真实键盘验收，不能以编译通过代替行为验证。
+
+用户后续确认 NSPanel 版本在全屏下可以弹出，但焦点位于扩展屏时仍在主屏弹出。已将 `NSScreen::mainScreen` 选屏改为通过 AX 读取前台应用焦点窗口，以逻辑坐标转换及最大重叠面积选择显示器；权限不足或读取失败时回退鼠标所在屏幕。新增单元测试覆盖左右、上方和跨屏窗口，扩展屏实际效果待验收。
+
+用户再次反馈仍在主屏。检查锁定版本 tao 的 macOS 实现发现，`set_outer_position`、`set_inner_size` 会异步派发 AppKit 操作，而当前原生面板定位直接同步执行；原有 `apply_launcher_window` 排队的旧屏位置存在覆盖新位置的竞态。macOS 路径现统一使用主线程原生尺寸和位置操作；AX 读取改为明确从 NSWorkspace 前台进程创建应用元素。缓存目录 `window-placement.json` 仅保留最近一次坐标诊断，不包含窗口标题或剪贴板内容。算法测试不覆盖操作系统消息队列，实际跨屏效果仍需验收。
+
+### Metadata
+- Frequency: first_time
+- Related Features: launcher, system-clipboard, global-shortcut
+
+---
+
 ## [FR-20260914-003] 主面板 Esc 分层返回
 
 **Logged**: 2026-09-14T16:30:00+08:00

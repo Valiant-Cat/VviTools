@@ -14,8 +14,24 @@ const TRAY_TOGGLE_ID: &str = "toggle";
 const TRAY_SETTINGS_ID: &str = "settings";
 const TRAY_QUIT_ID: &str = "quit";
 
+#[cfg(target_os = "macos")]
+tauri_nspanel::tauri_panel! {
+    panel!(LauncherPanel {
+        config: {
+            can_become_key_window: true,
+            can_become_main_window: false,
+            is_floating_panel: true,
+            hides_on_deactivate: false,
+            becomes_key_only_if_needed: false
+        }
+    })
+}
+
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -97,18 +113,60 @@ fn main() {
             app.global_shortcut().register(launcher_shortcut)?;
             app.global_shortcut().register(clipboard_shortcut)?;
 
+            configure_overlay_windows(app)?;
             setup_tray(app.handle())?;
             commands::start_clipboard_watcher();
 
             if let Some(window) = app.get_webview_window("main") {
                 let _ = commands::apply_launcher_window(&window, "launcher");
-                let _ = window.set_focus();
-                window.show()?;
+                commands::show_overlay_window(&window, "launcher")?;
             }
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("运行 VviTools 失败");
+}
+
+#[cfg(target_os = "macos")]
+fn configure_overlay_windows(app: &tauri::App) -> tauri::Result<()> {
+    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask};
+    use tauri_nspanel::WebviewWindowExt;
+
+    for label in ["main", "clipboard"] {
+        let Some(window) = app.get_webview_window(label) else {
+            continue;
+        };
+        let panel = window.to_panel::<LauncherPanel>()?;
+        let ns_window = window.ns_window()?;
+
+        unsafe {
+            let ns_window: &NSWindow = &*ns_window.cast();
+            let mut behavior = ns_window.collectionBehavior();
+            behavior.remove(
+                NSWindowCollectionBehavior::FullScreenPrimary
+                    | NSWindowCollectionBehavior::FullScreenNone,
+            );
+            behavior.insert(
+                NSWindowCollectionBehavior::CanJoinAllSpaces
+                    | NSWindowCollectionBehavior::FullScreenAuxiliary,
+            );
+            if objc2::available!(macos = 13.0) {
+                behavior.remove(
+                    NSWindowCollectionBehavior::Primary | NSWindowCollectionBehavior::Auxiliary,
+                );
+                behavior.insert(NSWindowCollectionBehavior::CanJoinAllApplications);
+            }
+            panel.set_style_mask(ns_window.styleMask() | NSWindowStyleMask::NonactivatingPanel);
+            ns_window.setCollectionBehavior(behavior);
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn configure_overlay_windows(_app: &tauri::App) -> tauri::Result<()> {
+    Ok(())
 }
 
 fn reset_launcher_view(window: &WebviewWindow) {
@@ -119,9 +177,8 @@ fn reset_launcher_view(window: &WebviewWindow) {
 fn show_launcher(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = commands::apply_launcher_window(&window, "launcher");
-        let _ = window.show();
         reset_launcher_view(&window);
-        let _ = window.set_focus();
+        let _ = commands::show_overlay_window(&window, "launcher");
     }
 }
 
@@ -134,8 +191,7 @@ fn show_clipboard(app: &AppHandle) {
             let _ = commands::apply_launcher_window(&window, "clipboard");
             let _ = window.emit("open-clipboard", ());
             let _ = window.eval("window.dispatchEvent(new CustomEvent('vvitools-open-clipboard'))");
-            let _ = window.show();
-            let _ = window.set_focus();
+            let _ = commands::show_overlay_window(&window, "clipboard");
         }
     }
 }
@@ -180,10 +236,9 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 fn show_settings(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = commands::apply_launcher_window(&window, "feature");
-        let _ = window.show();
         let _ = window.emit("open-settings", ());
         let _ = window.eval("window.dispatchEvent(new CustomEvent('vvitools-open-settings'))");
-        let _ = window.set_focus();
+        let _ = commands::show_overlay_window(&window, "feature");
     }
 }
 

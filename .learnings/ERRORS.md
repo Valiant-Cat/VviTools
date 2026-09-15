@@ -4,6 +4,218 @@
 
 ---
 
+## [ERR-20260915-007] tauri-build-generic-failure
+
+**Logged**: 2026-09-15T13:16:02+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: infra
+
+### Summary
+最终 `npm run build:install` 在 Rust Release 编译阶段返回无细节的 Tauri 构建失败，详细重跑确认进程以退出码 `137` 被系统终止。
+
+### Error
+```text
+failed to build app: failed to build app
+Error failed to build app: failed to build app
+```
+
+### Context
+- 同一代码已通过 `cargo check`、9 个测试、前端构建和 TypeScript 检查
+- 此前一次安装构建已成功，失败发生在加入旧 macOS 激活兼容分支后的最终重打包
+- `cargo build --release -vv` 未出现 Rust 编译错误，最终退出码为 `137`，符合系统因内存压力发送 `SIGKILL` 的表现
+- 磁盘仍有约 51 GiB 可用空间；部署目标变化导致大量依赖重新编译，默认并行度会显著增加峰值资源占用
+
+### Suggested Fix
+关闭正在运行的安装版 VviTools，并设置 `CARGO_BUILD_JOBS=2` 降低 Release 编译并行度后重跑构建安装。
+
+### Resolution
+降低并行度后 Release 构建、签名和安装成功，安装版签名校验通过。退出码 `137` 的具体系统原因未独立确认。
+
+### Metadata
+- Reproducible: unknown
+- Related Files: src-tauri/src/commands.rs, scripts/build-install-macos.sh
+
+---
+
+## [ERR-20260915-006] cargo-fmt-check
+
+**Logged**: 2026-09-15T12:44:09+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: backend
+
+### Summary
+新增 AppKit 主线程显示闭包后，首次 `cargo fmt --check` 未通过。
+
+### Error
+```text
+Diff in src-tauri/src/commands.rs: run_on_main_thread 闭包缩进不符合 rustfmt
+```
+
+### Context
+- Rust 编译已经通过
+- 仅为格式差异，不影响逻辑
+
+### Suggested Fix
+编辑 Rust 闭包后先运行 `cargo fmt`，再执行 `cargo fmt --check`。
+
+### Resolution
+已运行 `cargo fmt --manifest-path src-tauri/Cargo.toml` 并通过复查。
+
+### Metadata
+- Reproducible: yes
+- Related Files: src-tauri/src/commands.rs
+
+---
+
+## [ERR-20260915-005] launchservices-minus-600
+
+**Logged**: 2026-09-15T12:44:09+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: infra
+
+### Summary
+替换并重启安装版 VviTools 时，macOS LaunchServices 首次启动返回 `-600`。
+
+### Error
+```text
+_LSOpenURLsWithCompletionHandler() failed with error -600.
+```
+
+### Context
+- 刚执行 `pkill -x vvitools` 后立即调用 `open /Applications/VviTools.app`
+- 应用已通过签名构建并安装
+
+### Suggested Fix
+确认旧进程退出后重试启动；若 LaunchServices 仍未恢复，则直接启动 bundle 内二进制完成本轮验证。
+
+### Resolution
+使用 `open -n /Applications/VviTools.app` 重试后成功启动。
+
+### Metadata
+- Reproducible: unknown
+- Related Files: scripts/install-macos-app.sh
+
+---
+
+## [ERR-20260915-004] cua-vvitools-timeout
+
+**Logged**: 2026-09-15T12:15:53+08:00
+**Priority**: low
+**Status**: pending
+**Area**: infra
+
+### Summary
+在 TextEdit 全屏状态下获取刚启动的 VviTools 辅助功能树时，Computer Use 服务超时。
+
+### Error
+```text
+Computer Use server error -10005: timeoutReached
+```
+
+### Context
+- 已通过终端启动 `/Applications/VviTools.app`
+- 目的：检查主窗口是否覆盖当前全屏 Space
+- 后续截图显示启动窗口未停留在全屏界面，可能因当前“失焦即隐藏”行为立即收起，需通过全局快捷键继续验证
+- 最终构建安装后再次读取 VviTools 辅助功能树仍超时，因此改用快捷键后焦点状态与原生窗口配置交叉验证
+
+### Suggested Fix
+改用当前全屏 App 的屏幕截图确认视觉结果，并在 VviTools 稳定运行后重试其 bundle identifier。
+
+### Metadata
+- Reproducible: unknown
+- Related Files: src-tauri/src/main.rs, src-tauri/tauri.conf.json
+
+---
+
+## [ERR-20260915-003] missing-app-icon
+
+**Logged**: 2026-09-15T12:11:47+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: infra
+
+### Summary
+误尝试读取安装包中不存在的 `Contents/Resources/icon.icns`。
+
+### Error
+```text
+unable to locate image at /Applications/VviTools.app/Contents/Resources/icon.icns
+```
+
+### Context
+- 与全屏弹窗验证无关
+- 没有修改应用或文件
+
+### Suggested Fix
+需要检查应用资源时先用 `find` 确认实际文件名，不猜测资源路径。
+
+### Metadata
+- Reproducible: yes
+- Related Files: none
+
+---
+
+## [ERR-20260915-002] write-stdin-finished-session
+
+**Logged**: 2026-09-15T12:11:47+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: infra
+
+### Summary
+误对已经结束的构建会话再次调用 `write_stdin`。
+
+### Error
+```text
+write_stdin failed: Unknown process id 96597
+```
+
+### Context
+- 构建会话此前已正常结束，随后又误用了不存在的 session id `0`
+- 两次误轮询均不影响构建和安装结果
+
+### Suggested Fix
+长任务返回 `Process exited` 后不再轮询相同 session id。
+
+### Metadata
+- Reproducible: yes
+- Related Files: none
+
+---
+
+## [ERR-20260915-001] cua-get-app
+
+**Logged**: 2026-09-15T12:11:47+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: infra
+
+### Summary
+通过 Computer Use 获取 TextEdit 做 macOS 全屏验证时，辅助功能接口返回 `AXError.cannotComplete`。
+
+### Error
+```text
+Accessibility error: AXError.cannotComplete
+app is not defined
+```
+
+### Context
+- 动作：先用英文显示名调用 `cua.getApp("TextEdit")`，后用 bundle identifier 重试时复用了未成功创建的变量
+- 目的：验证 VviTools 在其他 App 的原生全屏 Space 中能否弹出
+- 环境：macOS，本地安装版 VviTools 0.1.2
+
+### Suggested Fix
+通过 Computer Use 枚举当前可用 App 后使用本地化名称或 bundle identifier 重试，并用新的 `var` 绑定保存对象。本轮已按该方式成功获取 TextEdit。
+
+### Metadata
+- Reproducible: unknown
+- Related Files: src-tauri/src/main.rs, src-tauri/tauri.conf.json
+
+---
+
 ## [ERR-20260914-005] ui-ux-pro-max-script-pointer
 
 **Logged**: 2026-09-14T14:00:00+08:00

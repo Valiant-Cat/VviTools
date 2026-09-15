@@ -14,9 +14,9 @@ use image::{ImageBuffer, RgbaImage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Digest;
-use tauri::{
-    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow,
-};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, WebviewWindow};
+#[cfg(not(target_os = "macos"))]
+use tauri::{PhysicalPosition, Position, Size};
 use tauri_plugin_autostart::ManagerExt;
 use vvitools_core::plugin::{
     bundled_plugins_dir, default_plugins_dir, delete_user_plugin, ensure_action_allowed,
@@ -804,8 +804,7 @@ pub fn open_clipboard_window(app: tauri::AppHandle) -> Result<(), String> {
     apply_launcher_window(&window, "clipboard")?;
     let _ = window.emit("open-clipboard", ());
     let _ = window.eval("window.dispatchEvent(new CustomEvent('vvitools-open-clipboard'))");
-    window.show().map_err(to_message)?;
-    window.set_focus().map_err(to_message)
+    show_overlay_window(&window, "clipboard")
 }
 
 #[tauri::command]
@@ -817,11 +816,10 @@ pub fn open_accessibility_permission_window(app: tauri::AppHandle) -> Result<(),
         .get_webview_window("main")
         .ok_or_else(|| "主窗口不存在".to_string())?;
     apply_launcher_window(&window, "permission")?;
-    window.show().map_err(to_message)?;
     let _ = window.emit("open-accessibility-permission", ());
     let _ = window
         .eval("window.dispatchEvent(new CustomEvent('vvitools-open-accessibility-permission'))");
-    window.set_focus().map_err(to_message)
+    show_overlay_window(&window, "permission")
 }
 
 #[tauri::command]
@@ -845,13 +843,58 @@ pub fn set_launcher_view(app: tauri::AppHandle, view: String) -> Result<(), Stri
     Ok(())
 }
 
-pub fn apply_launcher_window(window: &WebviewWindow, view: &str) -> Result<(), String> {
-    let size = match view {
+fn launcher_size(view: &str) -> LogicalSize<f64> {
+    match view {
         "feature" => LogicalSize::new(980.0, 640.0),
         "permission" => LogicalSize::new(500.0, 340.0),
         "clipboard" => LogicalSize::new(940.0, 238.0),
         _ => LogicalSize::new(720.0, 420.0),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn position_native_overlay(
+    window: &objc2_app_kit::NSWindow,
+    screen: &objc2_app_kit::NSScreen,
+    size: LogicalSize<f64>,
+    bottom_aligned: bool,
+) {
+    use objc2_foundation::{NSPoint, NSSize};
+    // 不混用 Tauri 的异步尺寸/位置 API，防止旧坐标在显示后覆盖目标屏幕。
+    window.setContentSize(NSSize::new(size.width, size.height));
+    let area = screen.visibleFrame();
+    let frame = window.frame();
+    let x = area.origin.x + (area.size.width - frame.size.width) / 2.0;
+    let y = if bottom_aligned {
+        area.origin.y + 24.0
+    } else {
+        area.origin.y + (area.size.height - frame.size.height) / 2.0
     };
+    window.setFrameOrigin(NSPoint::new(x, y));
+}
+
+#[cfg(target_os = "macos")]
+pub fn apply_launcher_window(window: &WebviewWindow, view: &str) -> Result<(), String> {
+    use tauri_nspanel::ManagerExt;
+    let panel = window
+        .app_handle()
+        .get_webview_panel(window.label())
+        .map_err(|_| "原生面板尚未初始化".to_string())?;
+    let size = launcher_size(view);
+    let bottom_aligned = view == "clipboard";
+    window
+        .run_on_main_thread(move || {
+            let native = panel.as_panel();
+            if let Some(screen) = native.screen() {
+                position_native_overlay(native, &screen, size, bottom_aligned);
+            }
+        })
+        .map_err(to_message)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn apply_launcher_window(window: &WebviewWindow, view: &str) -> Result<(), String> {
+    let size = launcher_size(view);
     window.set_size(Size::Logical(size)).map_err(to_message)?;
     if let Ok(Some(monitor)) = window.current_monitor() {
         let scale = monitor.scale_factor();
@@ -873,8 +916,246 @@ pub fn apply_launcher_window(window: &WebviewWindow, view: &str) -> Result<(), S
     } else {
         let _ = window.center();
     }
-    let _ = window.set_focus();
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn focused_window_frame() -> Option<objc2_foundation::NSRect> {
+    use core_foundation::base::{CFType, CFTypeRef};
+    use core_foundation::string::CFStringRef;
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+    use std::ffi::c_void;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXUIElementCreateApplication(pid: i32) -> CFTypeRef;
+        fn AXUIElementCopyAttributeValue(
+            element: CFTypeRef,
+            attribute: CFStringRef,
+            value: *mut CFTypeRef,
+        ) -> i32;
+        fn AXUIElementSetMessagingTimeout(element: CFTypeRef, timeout: f32) -> i32;
+        fn AXValueGetTypeID() -> usize;
+        fn AXValueGetValue(value: CFTypeRef, kind: i32, output: *mut c_void) -> u8;
+    }
+
+    fn attribute(element: &CFType, name: &str) -> Option<CFType> {
+        let mut value = std::ptr::null();
+        let name = CFString::new(name);
+        unsafe {
+            AXUIElementSetMessagingTimeout(element.as_CFTypeRef(), 0.15);
+            if AXUIElementCopyAttributeValue(
+                element.as_CFTypeRef(),
+                name.as_concrete_TypeRef(),
+                &mut value,
+            ) != 0
+                || value.is_null()
+            {
+                return None;
+            }
+            Some(CFType::wrap_under_create_rule(value))
+        }
+    }
+
+    if !macos_accessibility_trusted(false) {
+        return None;
+    }
+    unsafe {
+        let frontmost = objc2_app_kit::NSWorkspace::sharedWorkspace().frontmostApplication()?;
+        let application = AXUIElementCreateApplication(frontmost.processIdentifier());
+        if application.is_null() {
+            return None;
+        }
+        let app = CFType::wrap_under_create_rule(application);
+        let window =
+            attribute(&app, "AXFocusedWindow").or_else(|| attribute(&app, "AXMainWindow"))?;
+        let position = attribute(&window, "AXPosition")?;
+        let size = attribute(&window, "AXSize")?;
+        if position.type_of() != AXValueGetTypeID() || size.type_of() != AXValueGetTypeID() {
+            return None;
+        }
+        let mut origin = NSPoint::default();
+        let mut extent = NSSize::default();
+        if AXValueGetValue(
+            position.as_CFTypeRef(),
+            1,
+            (&mut origin as *mut NSPoint).cast(),
+        ) == 0
+            || AXValueGetValue(size.as_CFTypeRef(), 2, (&mut extent as *mut NSSize).cast()) == 0
+        {
+            return None;
+        }
+        Some(NSRect::new(origin, extent))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn frontmost_visible_window_frame() -> Option<objc2_foundation::NSRect> {
+    use core_foundation::{
+        array::{CFArray, CFArrayRef},
+        base::CFType,
+        number::CFNumber,
+    };
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGWindowListCopyWindowInfo(options: u32, relative_to: u32) -> CFArrayRef;
+    }
+
+    fn number(dict: &CFDictionary<CFString, CFType>, key: &str) -> Option<f64> {
+        dict.find(&CFString::new(key))?
+            .downcast::<CFNumber>()?
+            .to_f64()
+    }
+
+    let app = objc2_app_kit::NSWorkspace::sharedWorkspace().frontmostApplication()?;
+    let pid = app.processIdentifier() as f64;
+    // 仅查询当前可见窗口元数据，不获取图像或窗口标题。
+    let raw = unsafe { CGWindowListCopyWindowInfo(1 | 16, 0) };
+    if raw.is_null() {
+        return None;
+    }
+    let windows: CFArray<CFDictionary<CFString, CFType>> =
+        unsafe { CFArray::wrap_under_create_rule(raw) };
+    for window in windows.iter() {
+        if number(&window, "kCGWindowOwnerPID") != Some(pid)
+            || number(&window, "kCGWindowLayer") != Some(0.0)
+            || number(&window, "kCGWindowAlpha").unwrap_or(1.0) <= 0.0
+        {
+            continue;
+        }
+        let Some(bounds) = window
+            .find(&CFString::new("kCGWindowBounds"))
+            .and_then(|value| value.downcast::<CFDictionary>())
+        else {
+            continue;
+        };
+        let bounds: CFDictionary<CFString, CFType> =
+            unsafe { CFDictionary::wrap_under_get_rule(bounds.as_concrete_TypeRef()) };
+        let geometry = (
+            number(&bounds, "X"),
+            number(&bounds, "Y"),
+            number(&bounds, "Width"),
+            number(&bounds, "Height"),
+        );
+        if let (Some(x), Some(y), Some(width), Some(height)) = geometry {
+            if width > 0.0 && height > 0.0 {
+                return Some(NSRect::new(NSPoint::new(x, y), NSSize::new(width, height)));
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn focused_screen_index(
+    window: objc2_foundation::NSRect,
+    screens: &[objc2_foundation::NSRect],
+) -> Option<usize> {
+    // AX 使用主屏左上角为原点，AppKit 使用主屏左下角；两者均为逻辑坐标。
+    let primary_top = screens.first()?.origin.y + screens.first()?.size.height;
+    let top = primary_top - window.origin.y;
+    let bottom = top - window.size.height;
+    let mut best = None;
+    let mut best_area = 0.0;
+    for (index, screen) in screens.iter().enumerate() {
+        let width = (window.origin.x + window.size.width).min(screen.origin.x + screen.size.width)
+            - window.origin.x.max(screen.origin.x);
+        let height = top.min(screen.origin.y + screen.size.height) - bottom.max(screen.origin.y);
+        let area = width.max(0.0) * height.max(0.0);
+        if area > best_area {
+            best = Some(index);
+            best_area = area;
+        }
+    }
+    best
+}
+
+#[cfg(target_os = "macos")]
+pub fn show_overlay_window(window: &WebviewWindow, view: &str) -> Result<(), String> {
+    use tauri_nspanel::ManagerExt;
+    let panel = window
+        .app_handle()
+        .get_webview_panel(window.label())
+        .map_err(|_| "原生面板尚未初始化".to_string())?;
+    let bottom_aligned = view == "clipboard";
+    let size = launcher_size(view);
+    let diagnostic_path = window
+        .app_handle()
+        .path()
+        .app_cache_dir()
+        .ok()
+        .map(|dir| dir.join("window-placement.json"));
+    let label = window.label().to_string();
+    window
+        .run_on_main_thread(move || {
+            use objc2::MainThreadMarker;
+            use objc2_app_kit::{NSEvent, NSScreen};
+
+            if let Some(mtm) = MainThreadMarker::new() {
+                let ns_window = panel.as_panel();
+                let screens = NSScreen::screens(mtm);
+                let frames: Vec<_> = screens.iter().map(|screen| screen.frame()).collect();
+                let focused_frame = focused_window_frame();
+                let visible_frame = if focused_frame.is_none() {
+                    frontmost_visible_window_frame()
+                } else {
+                    None
+                };
+                let focused_index = focused_frame
+                    .or(visible_frame)
+                    .and_then(|frame| focused_screen_index(frame, &frames));
+                let mouse = NSEvent::mouseLocation();
+                let target_index = focused_index.or_else(|| {
+                    frames.iter().position(|frame| {
+                        mouse.x >= frame.origin.x
+                            && mouse.x < frame.origin.x + frame.size.width
+                            && mouse.y >= frame.origin.y
+                            && mouse.y < frame.origin.y + frame.size.height
+                    })
+                });
+                let screen = target_index
+                    .map(|index| screens.objectAtIndex(index))
+                    .or_else(|| ns_window.screen())
+                    .or_else(|| NSScreen::mainScreen(mtm));
+                if let Some(screen) = screen {
+                    position_native_overlay(ns_window, &screen, size, bottom_aligned);
+                }
+
+                // 非激活式面板直接接收键盘焦点，不激活应用以免切回桌面空间。
+                panel.show_and_make_key();
+                if let Some(path) = diagnostic_path {
+                    let rect = |r: objc2_foundation::NSRect| {
+                        [r.origin.x, r.origin.y, r.size.width, r.size.height]
+                    };
+                    let snapshot = serde_json::json!({
+                        "time": Utc::now().to_rfc3339(),
+                        "window": label,
+                        "accessibility_trusted": macos_accessibility_trusted(false),
+                        "focused_window_ax": focused_frame.map(rect),
+                        "frontmost_window_cg": visible_frame.map(rect),
+                        "screens_appkit": frames.into_iter().map(rect).collect::<Vec<_>>(),
+                        "mouse_appkit": [mouse.x, mouse.y],
+                        "focused_screen": focused_index,
+                        "target_screen": target_index,
+                        "actual_frame_appkit": rect(ns_window.frame())
+                    });
+                    // 仅保留最后一次坐标诊断，不记录窗口标题或剪贴板内容。
+                    if let Some(parent) = path.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let _ = fs::write(path, snapshot.to_string());
+                }
+            }
+        })
+        .map_err(to_message)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn show_overlay_window(window: &WebviewWindow, _view: &str) -> Result<(), String> {
+    window.show().map_err(to_message)?;
+    window.set_focus().map_err(to_message)
 }
 
 fn bundled_marketplace(
@@ -1471,6 +1752,47 @@ impl<T> Pipe for T {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn focused_screen_tracks_external_displays_and_spanning_windows() {
+        use objc2_foundation::{NSPoint, NSRect, NSSize};
+        let rect = |x, y, w, h| NSRect::new(NSPoint::new(x, y), NSSize::new(w, h));
+        let screens = [
+            rect(0.0, 0.0, 1440.0, 900.0),
+            rect(1440.0, 0.0, 1920.0, 1080.0),
+            rect(-1920.0, 0.0, 1920.0, 1080.0),
+            rect(0.0, 900.0, 1440.0, 900.0),
+        ];
+        assert_eq!(
+            focused_screen_index(rect(1500.0, 0.0, 800.0, 600.0), &screens),
+            Some(1)
+        );
+        assert_eq!(
+            focused_screen_index(rect(-1800.0, 0.0, 800.0, 600.0), &screens),
+            Some(2)
+        );
+        assert_eq!(
+            focused_screen_index(rect(100.0, -800.0, 800.0, 600.0), &screens),
+            Some(3)
+        );
+        assert_eq!(
+            focused_screen_index(rect(1300.0, 0.0, 800.0, 600.0), &screens),
+            Some(1)
+        );
+        assert_eq!(
+            focused_screen_index(rect(100.0, 100.0, 800.0, 600.0), &screens),
+            Some(0)
+        );
+        assert_eq!(
+            focused_screen_index(rect(5000.0, 0.0, 800.0, 600.0), &screens),
+            None
+        );
+        assert_eq!(
+            focused_screen_index(rect(0.0, 0.0, 800.0, 600.0), &[]),
+            None
+        );
+    }
 
     fn clipboard_item(id: &str, copied_at: DateTime<Utc>, favorite: bool) -> ClipboardItem {
         ClipboardItem {
